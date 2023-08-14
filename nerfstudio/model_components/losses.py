@@ -118,7 +118,7 @@ def interlevel_loss(weights_list, ray_samples_list) -> torch.Tensor:
     return loss_interlevel
 
 
-def blur_stepfun(x: torch.Tensor, y: torch.Tensor, r: float) -> Tuple[torch.Tensor, torch.Tensor]:
+def blur_stepfun(x: Tensor, y: Tensor, r: float) -> Tuple[Tensor, Tensor]:
     xr, xr_idx = torch.sort(torch.cat([x - r, x + r], dim=-1))
     y1 = (
         torch.cat([y, torch.zeros_like(y[..., :1])], dim=-1) - torch.cat([torch.zeros_like(y[..., :1]), y], dim=-1)
@@ -136,15 +136,18 @@ def sorted_interp_quad(x, xp, fpdf, fcdf):
     # The final `True` index in `mask` is the start of the matching interval.
     mask = x[..., None, :] >= xp[..., :, None]
 
-    def find_interval(x):
+    def find_interval(x: Tensor, return_idx=False):
         # Grab the value where `mask` switches from True to False, and vice versa.
         # This approach takes advantage of the fact that `x` is sorted.
-        x0 = torch.max(torch.where(mask, x[..., None], x[..., :1, None]), -2).values
-        x1 = torch.min(torch.where(~mask, x[..., None], x[..., -1:, None]), -2).values
+        x0, x0_idx = torch.max(torch.where(mask, x[..., None], x[..., :1, None]), -2)
+        x1, x1_idx = torch.min(torch.where(~mask, x[..., None], x[..., -1:, None]), -2)
+        if return_idx:
+            return x0, x1, x0_idx, x1_idx
         return x0, x1
 
-    fpdf0, fpdf1 = find_interval(fpdf)
-    fcdf0, _ = find_interval(fcdf)
+    fcdf0, fcdf1, fcdf0_idx, fcdf1_idx = find_interval(fcdf, return_idx=True)
+    fpdf0 = fpdf.take_along_dim(fcdf0_idx, dim=-1)
+    fpdf1 = fpdf.take_along_dim(fcdf1_idx, dim=-1)
     xp0, xp1 = find_interval(xp)
 
     offset = torch.clip(torch.nan_to_num((x - xp0) / (xp1 - xp0), 0), 0, 1)
@@ -152,13 +155,16 @@ def sorted_interp_quad(x, xp, fpdf, fcdf):
     return ret
 
 
-def zipnerf_loss(weights_list, ray_samples_list):
+def zipnerf_loss(
+    weights_list: List[Tensor],
+    ray_samples_list: List[RaySamples],
+    pulse_widths: Tuple[float, float] = (0.03, 0.003),
+) -> Tensor:
     """Anti-aliased interlevel loss proposed in ZipNeRF paper."""
     # ground truth s and w (real nerf samples)
     # This implementation matches ZipNeRF up to the scale.
     # In the paper the loss is computed as the sum over the ray samples.
     # Here we take the mean and the multiplier for this loss should be changed accordingly.
-    pulse_widths = [0.003, 0.03]
     c = ray_samples_list[-1].to_sdist().detach()
     w = weights_list[-1][..., 0].detach()
 
@@ -197,11 +203,14 @@ def lossfun_distortion(t, w):
     return loss_inter + loss_intra
 
 
-def distortion_loss(weights_list, ray_samples_list):
+def distortion_loss(
+    weights_list: List[Tensor],
+    ray_samples_list: List[RaySamples],
+) -> Tensor:
     """From mipnerf360"""
     c = ray_samples_list[-1].to_sdist()
     w = weights_list[-1][..., 0]
-    loss = torch.mean(lossfun_distortion(c, w))
+    loss = lossfun_distortion(c, w).mean()
     return loss
 
 
@@ -259,7 +268,8 @@ def orientation_loss(
     """
     w = weights
     n = normals
-    v = viewdirs * -1
+    # Negate viewdirs to represent normalized vectors from point to camera.
+    v = -viewdirs
     n_dot_v = (n * v[..., None, :]).sum(dim=-1)
     return (w[..., 0] * torch.fmin(torch.zeros_like(n_dot_v), n_dot_v) ** 2).sum(dim=-1)
 
@@ -638,7 +648,7 @@ class CharbonnierLoss(nn.Module):
     def __init__(self, padding: float = 1e-3):
         super().__init__()
 
-        self.padding = padding
+        self.padding_square = padding ** 2
 
     def forward(
         self,
@@ -653,7 +663,7 @@ class CharbonnierLoss(nn.Module):
             loss
         """
         square_loss = (prediction - target) ** 2
-        loss = torch.sqrt(square_loss + self.padding**2)
+        loss = torch.sqrt(square_loss + self.padding_square)
 
         return torch.mean(loss)
 
@@ -667,7 +677,7 @@ class RawNeRFLoss(nn.Module):
     def __init__(self, padding: float = 1e-3):
         super().__init__()
 
-        self.padding = padding
+        self.padding_square = padding ** 2
 
     def forward(
         self,
@@ -684,7 +694,7 @@ class RawNeRFLoss(nn.Module):
         rgb_render_clip = prediction.clamp_max(1)
         resid_sq_clip = (rgb_render_clip - target) ** 2
         # Scale by gradient of log tonemapping curve.
-        scaling_grad = 1.0 / (self.padding + rgb_render_clip.detach())
+        scaling_grad = 1.0 / (self.padding_square + rgb_render_clip.detach())
         # Reweighted L2 loss.
         data_loss = resid_sq_clip * scaling_grad**2
 

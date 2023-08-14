@@ -19,7 +19,7 @@ NeRF implementation that combines many recent advancements.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Literal, Tuple, Type
+from typing import Dict, List, Literal, Tuple, Type, Optional
 
 import numpy as np
 import torch
@@ -28,7 +28,7 @@ from torchmetrics.functional import structural_similarity_index_measure
 from torchmetrics.image import PeakSignalNoiseRatio
 from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 
-from nerfstudio.cameras.rays import RayBundle, RaySamples
+from nerfstudio.cameras.rays import RayBundle
 from nerfstudio.engine.callbacks import TrainingCallback, TrainingCallbackAttributes, TrainingCallbackLocation
 from nerfstudio.field_components.field_heads import FieldHeadNames
 from nerfstudio.field_components.spatial_distortions import SceneContraction
@@ -49,6 +49,7 @@ from nerfstudio.model_components.renderers import AccumulationRenderer, DepthRen
 from nerfstudio.model_components.scene_colliders import NearFarCollider
 from nerfstudio.model_components.shaders import NormalsShader
 from nerfstudio.models.base_model import Model, ModelConfig
+from nerfstudio.cameras.bundle_adjustment import HashBundleAdjustment
 from nerfstudio.utils import colormaps
 
 
@@ -93,8 +94,8 @@ class NerfactoModelConfig(ModelConfig):
     """Use the same proposal network. Otherwise use different ones."""
     proposal_net_args_list: List[Dict] = field(
         default_factory=lambda: [
-            {"hidden_dim": 16, "log2_hashmap_size": 17, "num_levels": 5, "max_res": 256, "use_linear": False},
-            {"hidden_dim": 16, "log2_hashmap_size": 17, "num_levels": 5, "max_res": 512, "use_linear": False},
+            {"hidden_dim": 16, "log2_hashmap_size": 17, "num_levels": 5, "max_res": 256, "use_linear": False, "features_per_level": 2},
+            {"hidden_dim": 16, "log2_hashmap_size": 17, "num_levels": 5, "max_res": 512, "use_linear": False, "features_per_level": 2},
         ]
     )
     """Arguments for the proposal density fields."""
@@ -122,7 +123,7 @@ class NerfactoModelConfig(ModelConfig):
     """Whether to use average appearance embedding or zeros for inference."""
     proposal_weights_anneal_slope: float = 10.0
     """Slope of the annealing function for the proposal weights."""
-    proposal_weights_anneal_max_num_iters: int = 1
+    proposal_weights_anneal_max_num_iters: int = 1000
     """Max num iterations for the annealing function."""
     use_single_jitter: bool = True
     """Whether use single jitter or not for the proposal networks."""
@@ -132,10 +133,17 @@ class NerfactoModelConfig(ModelConfig):
     """Whether to disable scene contraction or not."""
     use_gradient_scaling: bool = False
     """Use gradient scaler where the gradients are lower for points closer to the camera."""
+    bundle_adjust: bool = False
+    """Whether to bundle adjust (BARF)"""
+    coarse_to_fine_iters: Optional[Tuple[float, float]] = (0.0, 0.8)
+    """Iterations (as a percentage of total iterations) at which coarse to fine hash grid optimization starts and ends.
+    Linear interpolation between (start, end) and full activation of hash grid from end onwards."""
     implementation: Literal["tcnn", "torch"] = "tcnn"
     """Which implementation to use for the model."""
     appearance_embed_dim: int = 32
     """Dimension of the appearance embedding."""
+    supervise_pred_normals_by_density: bool = True
+    """Whether to supervise predicted normals by density."""
 
 
 class NerfactoModel(Model):
@@ -152,15 +160,21 @@ class NerfactoModel(Model):
         super().populate_modules()
 
         if self.config.disable_scene_contraction:
-            scene_contraction = None
+            self.scene_contraction = None
         else:
-            scene_contraction = SceneContraction(order=float("inf"))
+            self.scene_contraction = SceneContraction(order=float("inf"))
 
-        regularize_function = getattr(torch, self.config.regularize_function, torch.square)
+        self.regularize_function = getattr(torch, self.config.regularize_function, torch.square)
+
+        self.bundle_adjustment = HashBundleAdjustment(
+            bundle_adjust=self.config.bundle_adjust,
+            coarse_to_fine_iters=self.config.coarse_to_fine_iters,
+        )
 
         # Fields
         self.field = NerfactoField(
             self.scene_box.aabb,
+            self.bundle_adjustment,
             hidden_dim=self.config.hidden_dim,
             num_levels=self.config.num_levels,
             max_res=self.config.max_res,
@@ -169,12 +183,12 @@ class NerfactoModel(Model):
             log2_hashmap_size=self.config.log2_hashmap_size,
             hidden_dim_color=self.config.hidden_dim_color,
             hidden_dim_transient=self.config.hidden_dim_transient,
-            spatial_distortion=scene_contraction,
+            spatial_distortion=self.scene_contraction,
             num_images=self.num_train_data,
             use_pred_normals=self.config.predict_normals,
             use_average_appearance_embedding=self.config.use_average_appearance_embedding,
             appearance_embedding_dim=self.config.appearance_embed_dim,
-            regularize_function=regularize_function,
+            regularize_function=self.regularize_function,
             compute_hash_regularization=self.config.compute_hash_regularization,
             implementation=self.config.implementation,
         )
@@ -188,9 +202,10 @@ class NerfactoModel(Model):
             prop_net_args = self.config.proposal_net_args_list[0]
             network = HashMLPDensityField(
                 self.scene_box.aabb,
-                spatial_distortion=scene_contraction,
+                self.bundle_adjustment,
+                spatial_distortion=self.scene_contraction,
                 **prop_net_args,
-                regularize_function=regularize_function,
+                regularize_function=self.regularize_function,
                 compute_hash_regularization=self.config.compute_hash_regularization,
                 implementation=self.config.implementation,
             )
@@ -201,9 +216,10 @@ class NerfactoModel(Model):
                 prop_net_args = self.config.proposal_net_args_list[min(i, len(self.config.proposal_net_args_list) - 1)]
                 network = HashMLPDensityField(
                     self.scene_box.aabb,
-                    spatial_distortion=scene_contraction,
+                    self.bundle_adjustment,
+                    spatial_distortion=self.scene_contraction,
                     **prop_net_args,
-                    regularize_function=regularize_function,
+                    regularize_function=self.regularize_function,
                     compute_hash_regularization=self.config.compute_hash_regularization,
                     implementation=self.config.implementation,
                 )
@@ -246,6 +262,7 @@ class NerfactoModel(Model):
 
         # losses
         self.rgb_loss = MSELoss()
+
         if self.config.interlevel_loss_type == "mipnerf":
             self.interlevel_loss = interlevel_loss
         else:
@@ -294,12 +311,22 @@ class NerfactoModel(Model):
                     func=self.proposal_sampler.step_cb,
                 )
             )
+            callbacks.append(
+                TrainingCallback(
+                    where_to_run=[TrainingCallbackLocation.AFTER_TRAIN_ITERATION],
+                    update_every_num_iters=1,
+                    func=self.bundle_adjustment.step_cb,
+                )
+            )
         return callbacks
 
     def get_outputs(self, ray_bundle: RayBundle):
-        ray_samples: RaySamples
         ray_samples, weights_list, ray_samples_list = self.proposal_sampler(ray_bundle, density_fns=self.density_fns)
-        field_outputs = self.field.forward(ray_samples, compute_normals=self.config.predict_normals)
+        field_outputs = self.field.forward(
+            ray_samples,
+            ray_bundle=ray_bundle,
+            compute_normals=self.config.predict_normals,
+        )
         if self.config.use_gradient_scaling:
             field_outputs = scale_gradients_by_distance_squared(field_outputs, ray_samples)
 
@@ -316,6 +343,24 @@ class NerfactoModel(Model):
             "accumulation": accumulation,
             "depth": depth,
         }
+
+        if FieldHeadNames.ROUGHNESS in field_outputs:
+            outputs["roughness"] = self.roughness_renderer(
+                roughness=field_outputs[FieldHeadNames.ROUGHNESS],
+                weights=weights,
+            )
+
+        if FieldHeadNames.DIFFUSE_COLOR in field_outputs:
+            outputs["diffuse_color"] = self.renderer_rgb(
+                rgb=field_outputs[FieldHeadNames.DIFFUSE_COLOR],
+                weights=weights,
+            )
+        
+        if FieldHeadNames.SPECULAR_TINT in field_outputs:
+            outputs["specular_tint"] = self.renderer_rgb(
+                rgb=field_outputs[FieldHeadNames.SPECULAR_TINT],
+                weights=weights,
+            )
 
         if self.config.predict_normals:
             normals = self.renderer_normals(normals=field_outputs[FieldHeadNames.NORMALS], weights=weights)
@@ -338,11 +383,12 @@ class NerfactoModel(Model):
                 weights.detach(), field_outputs[FieldHeadNames.NORMALS], ray_bundle.directions
             )
 
-            outputs["rendered_pred_normal_loss"] = pred_normal_loss(
-                weights.detach(),
-                field_outputs[FieldHeadNames.NORMALS].detach(),
-                field_outputs[FieldHeadNames.PRED_NORMALS],
-            )
+            if self.config.supervise_pred_normals_by_density:
+                outputs["rendered_pred_normal_loss"] = pred_normal_loss(
+                    weights.detach(),
+                    field_outputs[FieldHeadNames.NORMALS].detach(),
+                    field_outputs[FieldHeadNames.PRED_NORMALS],
+                )
 
         for i in range(self.config.num_proposal_iterations):
             outputs[f"prop_depth_{i}"] = self.renderer_depth(weights=weights_list[i], ray_samples=ray_samples_list[i])
@@ -358,6 +404,7 @@ class NerfactoModel(Model):
 
         if self.training:
             metrics_dict["distortion"] = distortion_loss(outputs["weights_list"], outputs["ray_samples_list"])
+            metrics_dict["bundle_adjust_progress"] = self.bundle_adjustment.get_progress()
         return metrics_dict
 
     def get_loss_dict(self, outputs, batch, metrics_dict=None):
@@ -387,9 +434,10 @@ class NerfactoModel(Model):
                 )
 
                 # ground truth supervision for normals
-                loss_dict["pred_normal_loss"] = self.config.pred_normal_loss_mult * torch.mean(
-                    outputs["rendered_pred_normal_loss"]
-                )
+                if self.config.supervise_pred_normals_by_density:
+                    loss_dict["pred_normal_loss"] = self.config.pred_normal_loss_mult * torch.mean(
+                        outputs["rendered_pred_normal_loss"]
+                    )
         return loss_dict
 
     def get_image_metrics_and_images(
@@ -414,13 +462,48 @@ class NerfactoModel(Model):
 
         psnr = self.psnr(gt_rgb, predicted_rgb)
         ssim = self.ssim(gt_rgb, predicted_rgb)
-        lpips = self.lpips(gt_rgb, predicted_rgb)
+        lpips = 0. # self.lpips(gt_rgb, predicted_rgb)
 
         # all of these metrics will be logged as scalars
         metrics_dict = {"psnr": float(psnr.item()), "ssim": float(ssim)}  # type: ignore
         metrics_dict["lpips"] = float(lpips)
 
-        images_dict = {"img": combined_rgb, "accumulation": combined_acc, "depth": combined_depth}
+        images_dict = {
+            "img": combined_rgb,
+            "accumulation": combined_acc,
+            "depth": combined_depth,
+        }
+
+        if self.config.predict_normals:
+            images_dict["normals"] = torch.cat([outputs["normals"]], dim=1)
+            images_dict["pred_normals"] = torch.cat([outputs["pred_normals"]], dim=1)
+
+        if "roughness" in outputs:
+            images_dict["roughness"] = torch.cat(
+                [
+                    colormaps.apply_depth_colormap(
+                        outputs["roughness"],
+                        accumulation=outputs["accumulation"],
+                    ),
+                ],
+                dim=1,
+            )
+
+        if "diffuse_color" in outputs:
+            images_dict["diffuse_color"] = torch.cat(
+                [
+                    outputs["diffuse_color"],
+                ],
+                dim=1,
+            )
+        
+        if "specular_tint" in outputs:
+            images_dict["specular_tint"] = torch.cat(
+                [
+                    outputs["specular_tint"],
+                ],
+                dim=1,
+            )
 
         for i in range(self.config.num_proposal_iterations):
             key = f"prop_depth_{i}"

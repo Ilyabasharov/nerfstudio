@@ -18,11 +18,12 @@ Field for compound nerf model, adds scene contraction and image embeddings to in
 
 
 from typing import Dict, Literal, Optional, Tuple, Callable
+from jaxtyping import Float
 
 import torch
 from torch import Tensor, nn
 
-from nerfstudio.cameras.rays import RaySamples
+from nerfstudio.cameras.rays import RaySamples, RayBundle
 from nerfstudio.data.scene_box import SceneBox
 from nerfstudio.field_components.activations import trunc_exp
 from nerfstudio.field_components.embedding import Embedding
@@ -38,6 +39,7 @@ from nerfstudio.field_components.field_heads import (
 from nerfstudio.field_components.mlp import MLP
 from nerfstudio.field_components.spatial_distortions import SpatialDistortion
 from nerfstudio.fields.base_field import Field, get_normalized_directions
+from nerfstudio.cameras.bundle_adjustment import HashBundleAdjustment
 
 
 class NerfactoField(Field):
@@ -45,6 +47,7 @@ class NerfactoField(Field):
 
     Args:
         aabb: parameters of scene aabb bounds
+        bundle_adjustment: BARF technique for adjust poses
         num_images: number of images in the dataset
         num_layers: number of hidden layers
         hidden_dim: dimension of hidden layers
@@ -71,10 +74,12 @@ class NerfactoField(Field):
     """
 
     aabb: Tensor
+    bundle_adjustment: HashBundleAdjustment
 
     def __init__(
         self,
         aabb: Tensor,
+        bundle_adjustment: HashBundleAdjustment,
         num_images: int,
         num_layers: int = 2,
         hidden_dim: int = 64,
@@ -105,9 +110,11 @@ class NerfactoField(Field):
 
         self.register_buffer("aabb", aabb)
         self.geo_feat_dim = geo_feat_dim
+        self.bundle_adjustment = bundle_adjustment
 
         self.register_buffer("max_res", torch.tensor(max_res))
         self.register_buffer("num_levels", torch.tensor(num_levels))
+        self.register_buffer("features_per_level", torch.tensor(features_per_level))
         self.register_buffer("log2_hashmap_size", torch.tensor(log2_hashmap_size))
 
         self.spatial_distortion = spatial_distortion
@@ -220,8 +227,11 @@ class NerfactoField(Field):
         self._sample_locations = positions
         if not self._sample_locations.requires_grad:
             self._sample_locations.requires_grad = True
-        positions_flat = positions.view(-1, 3)
-        h = self.mlp_base(positions_flat).view(*ray_samples.frustums.shape, -1)
+        hashgrid_vecs = self.mlp_base_grid(positions.view(-1, 3))
+        hashgrid_vecs = self.bundle_adjustment(
+            hashgrid_vecs.view(-1, self.num_levels, self.features_per_level),
+        ).view(-1, self.num_levels * self.features_per_level) # type: ignore
+        h = self.mlp_base_mlp(hashgrid_vecs).view(*ray_samples.frustums.shape, -1)
         density_before_activation, base_mlp_out = torch.split(h, [1, self.geo_feat_dim], dim=-1)
         self._density_before_activation = density_before_activation
 
@@ -233,7 +243,10 @@ class NerfactoField(Field):
         return density, base_mlp_out
 
     def get_outputs(
-        self, ray_samples: RaySamples, density_embedding: Optional[Tensor] = None
+        self,
+        ray_samples: RaySamples,
+        ray_bundle: Optional[RayBundle] = None,
+        density_embedding: Optional[Tensor] = None
     ) -> Dict[FieldHeadNames, Tensor]:
         assert density_embedding is not None
         outputs = {}

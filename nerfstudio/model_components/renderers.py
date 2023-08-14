@@ -387,7 +387,9 @@ class UncertaintyRenderer(nn.Module):
 
     @classmethod
     def forward(
-        cls, betas: Float[Tensor, "*bs num_samples 1"], weights: Float[Tensor, "*bs num_samples 1"]
+        cls,
+        betas: Float[Tensor, "*bs num_samples 1"],
+        weights: Float[Tensor, "*bs num_samples 1"],
     ) -> Float[Tensor, "*bs 1"]:
         """Calculate uncertainty along the ray.
 
@@ -437,3 +439,25 @@ class NormalsRenderer(nn.Module):
         if normalize:
             n = safe_normalize(n)
         return n
+
+
+class RoughnessRenderer(nn.Module):
+    """Calculate roughness along the ray."""
+
+    @classmethod
+    def forward(
+        cls,
+        roughness: Float[Tensor, "*bs num_samples 1"],
+        weights: Float[Tensor, "*bs num_samples 1"],
+    ) -> Float[Tensor, "*bs 1"]:
+        """Calculate uncertainty along the ray.
+
+        Args:
+            betas: Uncertainty betas for each sample.
+            weights: Weights of each sample.
+
+        Returns:
+            Rendering of uncertainty.
+        """
+        comp_roughness = torch.sum(weights * roughness, dim=-2)
+        return comp_roughness

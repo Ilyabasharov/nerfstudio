@@ -145,7 +145,10 @@ For example, here's how to build with support for GeForce 30xx series GPUs:
 
 ```bash
 docker build \
-    --build-arg CUDA_VERSION=11.8.0 \
+    --build-arg DOCKER_UID=$(id -u) \
+    --build-arg DOCKER_GID=$(id -g) \
+    --build-arg DOCKER_USER=${USER} \
+    --build-arg CUDA_VERSION=11.7.0 \
     --build-arg CUDA_ARCHITECTURES=86 \
     --build-arg OS_VERSION=22.04 \
     --tag nerfstudio-86 \

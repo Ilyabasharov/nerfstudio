@@ -37,7 +37,7 @@ def components_from_spherical_harmonics(
         directions: Spherical harmonic coefficients
     """
     num_components = levels**2
-    components = torch.zeros((*directions.shape[:-1], num_components), device=directions.device)
+    components = directions.new_zeros((*directions.shape[:-1], num_components))
 
     assert 1 <= levels <= 5, f"SH levels must be in [1,4], got {levels}"
     assert directions.shape[-1] == 3, f"Direction input should have three dimensions. Got {directions.shape[-1]}"
@@ -426,7 +426,7 @@ def normalized_depth_scale_and_shift(
 
     return scale, shift
 
-
+@torch_compile(dynamic=True, mode="reduce-overhead", backend="eager")
 def power_fn(x: torch.Tensor, lam: float = -1.5, max_bound: float = 1e10) -> torch.Tensor:
     """Power transformation function from Eq. 4 in ZipNeRF paper."""
 
@@ -445,6 +445,7 @@ def power_fn(x: torch.Tensor, lam: float = -1.5, max_bound: float = 1e10) -> tor
     return (lam_1 / lam) * ((x / lam_1 + 1) ** lam - 1)
 
 
+@torch_compile(dynamic=True, mode="reduce-overhead", backend="inductor")
 def inv_power_fn(
     x: torch.Tensor,
     lam: float = -1.5,
@@ -498,3 +499,55 @@ def powi(base: int, exponent: int) -> int:
 
 def next_multiple(val: int, divisor: int) -> int:
     return div_round_up(val, divisor) * divisor
+
+
+def generalized_binomial_coeff(a, k):
+    """Compute generalized binomial coefficients."""
+    return np.prod(a - np.arange(k)) / math.factorial(k)
+
+
+def assoc_legendre_coeff(l, m, k):
+    """Compute associated Legendre polynomial coefficients.
+    Returns the coefficient of the cos^k(theta)*sin^m(theta) term in the
+    (l, m)th associated Legendre polynomial, P_l^m(cos(theta)).
+    """
+    return ((-1) ** m * 2**l * math.factorial(l)
+        / math.factorial(k) / math.factorial(l - k - m)
+        * generalized_binomial_coeff(0.5 * (l + k + m - 1.0), l))
+
+
+def sph_harm_coeff(l, m, k):
+    """Compute spherical harmonic coefficients."""
+    return math.sqrt((2.0 * l + 1.0) * math.factorial(l - m)
+        / (4.0 * math.pi * math.factorial(l + m))) * assoc_legendre_coeff(l, m, k)
+
+
+@torch_compile(dynamic=True, mode="reduce-overhead", backend="eager")
+def reflect(viewdirs: torch.Tensor, normals: torch.Tensor) -> torch.Tensor:
+    """Reflect view directions about normals.
+
+    The reflection of a vector v about a unit vector n is a vector u such that
+    dot(v, n) = dot(u, n), and dot(u, u) = dot(v, v). The solution to these two
+    equations is u = 2 dot(n, v) n - v.
+
+    Args:
+        viewdirs: [..., 3] array of view directions.
+        normals: [..., 3] array of normal directions (assumed to be unit vectors).
+
+    Returns:
+        [..., 3] array of reflection directions.
+    """
+    return (
+        2.0 * (normals * viewdirs).sum(dim=-1, keepdim=True) * normals - viewdirs
+    )
+
+
+@torch_compile(dynamic=True, mode="reduce-overhead", backend="eager")
+def linear_to_srgb(
+    linear: torch.Tensor,
+    eps: float = 1e-8,
+) -> torch.Tensor:
+    """Assumes `linear` is in [0, 1], see https://en.wikipedia.org/wiki/SRGB."""
+    srgb0 = 323 / 25 * linear
+    srgb1 = (211 * torch.maximum(eps, linear) ** (5 / 12) - 11) / 200
+    return torch.where(linear <= 0.0031308, srgb0, srgb1)

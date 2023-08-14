@@ -24,7 +24,7 @@ import torch
 from jaxtyping import Float, Shaped
 from torch import Tensor, nn
 
-from nerfstudio.cameras.rays import RaySamples
+from nerfstudio.cameras.rays import RaySamples, RayBundle
 from nerfstudio.configs.base_config import InstantiateConfig
 from nerfstudio.field_components.field_heads import FieldHeadNames
 
@@ -92,7 +92,10 @@ class Field(nn.Module):
 
     @abstractmethod
     def get_outputs(
-        self, ray_samples: RaySamples, density_embedding: Optional[Tensor] = None
+        self,
+        ray_samples: RaySamples,
+        ray_bundle: Optional[RayBundle] = None,
+        density_embedding: Optional[Tensor] = None
     ) -> Dict[FieldHeadNames, Tensor]:
         """Computes and returns the colors. Returns output field values.
 
@@ -101,7 +104,12 @@ class Field(nn.Module):
             density_embedding: Density embeddings to condition on.
         """
 
-    def forward(self, ray_samples: RaySamples, compute_normals: bool = False) -> Dict[FieldHeadNames, Tensor]:
+    def forward(
+        self,
+        ray_samples: RaySamples,
+        ray_bundle: Optional[RayBundle] = None,
+        compute_normals: bool = False,
+    ) -> Dict[FieldHeadNames, Tensor]:
         """Evaluates the field at points along the ray.
 
         Args:
@@ -113,7 +121,11 @@ class Field(nn.Module):
         else:
             density, density_embedding = self.get_density(ray_samples)
 
-        field_outputs = self.get_outputs(ray_samples, density_embedding=density_embedding)
+        field_outputs = self.get_outputs(
+            ray_samples,
+            ray_bundle=ray_bundle,
+            density_embedding=density_embedding,
+        )
         field_outputs[FieldHeadNames.DENSITY] = density  # type: ignore
 
         if compute_normals:

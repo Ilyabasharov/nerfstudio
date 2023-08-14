@@ -28,11 +28,12 @@ from nerfstudio.field_components.mlp import MLP
 from nerfstudio.field_components.spatial_distortions import SpatialDistortion
 from nerfstudio.fields.nerfacto_field import NerfactoField
 from nerfstudio.utils.math import erf_approx
+from nerfstudio.cameras.bundle_adjustment import HashBundleAdjustment
 
 EPS = 1.0e-7
 
 
-class ZipNeRFField(NerfactoField):
+class ZipNerfactoField(NerfactoField):
     """Compound Field that uses TCNN
 
     Args:
@@ -66,6 +67,7 @@ class ZipNeRFField(NerfactoField):
     def __init__(
         self,
         aabb: Tensor,
+        bundle_adjustment: HashBundleAdjustment,
         num_images: int,
         num_layers: int = 2,
         hidden_dim: int = 64,
@@ -88,13 +90,14 @@ class ZipNeRFField(NerfactoField):
         use_pred_normals: bool = False,
         use_average_appearance_embedding: bool = False,
         spatial_distortion: Optional[SpatialDistortion] = None,
-        scale_featurization: bool = False,
+        scale_featurization: bool = True,
         regularize_function: Callable[[Tensor], Tensor] = torch.square,
         compute_hash_regularization: bool = True,
         implementation: Literal["tcnn", "torch"] = "tcnn",
     ) -> None:
         super().__init__(
             aabb=aabb,
+            bundle_adjustment=bundle_adjustment,
             num_images=num_images,
             num_layers=num_layers,
             hidden_dim=hidden_dim,
@@ -122,7 +125,6 @@ class ZipNeRFField(NerfactoField):
             implementation=implementation,
         )
 
-        self.features_per_level = features_per_level
         self.scale_featurization = scale_featurization
 
         self.last_dim = self.mlp_base_grid.get_out_dim()
@@ -181,17 +183,19 @@ class ZipNeRFField(NerfactoField):
         # cov in range (0, 1)
         cov = cov / 2.0
 
+        prefix_shape = list(mean.shape[:-1])
+
         self._sample_locations = mean
         if not self._sample_locations.requires_grad:
             self._sample_locations.requires_grad = True
 
-        prefix_shape = list(mean.shape[:-1])
-
         # hash grid performs trilerp inside itself
         mean = (
-            self.mlp_base_grid(mean.view(-1, 3))
-            .view(prefix_shape + [self.num_levels * self.features_per_level])  # type: ignore
-            .unflatten(-1, (self.num_levels, self.features_per_level))
+            self.bundle_adjustment(
+                self.mlp_base_grid(mean.view(-1, 3))
+                .view(prefix_shape + [self.num_levels * self.features_per_level])  # type: ignore
+                .unflatten(-1, (self.num_levels, self.features_per_level))
+            )
         )  # [..., "dim", "num_levels", "features_per_level"]
         weights = erf_approx(
             1 / (8**0.5 * (cov[..., None] * self.mlp_base_grid.scalings.view(-1)).abs()).clamp_min(EPS)  # type: ignore

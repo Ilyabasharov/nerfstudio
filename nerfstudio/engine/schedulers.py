@@ -120,7 +120,9 @@ class ExponentialDecayScheduler(Scheduler):
             lr_final = self.config.lr_final
 
         def func(step):
-            if step < self.config.warmup_steps:
+            if step > self.config.max_steps:
+                lr = self.config.lr_final
+            elif step < self.config.warmup_steps:
                 if self.config.ramp == "cosine":
                     lr = self.config.lr_pre_warmup + (lr_init - self.config.lr_pre_warmup) * np.sin(
                         0.5 * np.pi * np.clip(step / self.config.warmup_steps, 0, 1)

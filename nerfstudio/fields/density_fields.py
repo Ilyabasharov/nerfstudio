@@ -29,6 +29,7 @@ from nerfstudio.field_components.mlp import MLP
 from nerfstudio.field_components.spatial_distortions import SpatialDistortion
 from nerfstudio.fields.base_field import Field, FieldHeadNames
 from nerfstudio.utils.math import erf_approx
+from nerfstudio.cameras.bundle_adjustment import HashBundleAdjustment
 
 EPS = 1.0e-7
 
@@ -42,6 +43,7 @@ class HashMLPDensityField(Field):
         hidden_dim: dimension of hidden layers
         spatial_distortion: spatial distortion module
         use_linear: whether to skip the MLP and use a single linear layer instead
+        bundle_adjustment: BARF technique for adjust poses
     """
 
     aabb: Tensor
@@ -49,6 +51,7 @@ class HashMLPDensityField(Field):
     def __init__(
         self,
         aabb: Tensor,
+        bundle_adjustment: HashBundleAdjustment,
         num_layers: int = 2,
         hidden_dim: int = 64,
         spatial_distortion: Optional[SpatialDistortion] = None,
@@ -64,6 +67,7 @@ class HashMLPDensityField(Field):
     ) -> None:
         super().__init__()
         self.register_buffer("aabb", aabb)
+        self.bundle_adjustment = bundle_adjustment
         self.spatial_distortion = spatial_distortion
         self.use_linear = use_linear
         self.regularize_function = regularize_function
@@ -71,6 +75,7 @@ class HashMLPDensityField(Field):
 
         self.register_buffer("max_res", torch.tensor(max_res))
         self.register_buffer("num_levels", torch.tensor(num_levels))
+        self.register_buffer("features_per_level", torch.tensor(features_per_level))
         self.register_buffer("log2_hashmap_size", torch.tensor(log2_hashmap_size))
 
         self.encoding = HashEncoding(
@@ -92,7 +97,6 @@ class HashMLPDensityField(Field):
                 out_activation=None,
                 implementation=implementation,
             )
-            self.mlp_base = torch.nn.Sequential(self.encoding, self.network)
         else:
             self.network = torch.nn.Linear(self.encoding.get_out_dim(), 1)
 
@@ -106,15 +110,11 @@ class HashMLPDensityField(Field):
         # Make sure the tcnn gets inputs between 0 and 1.
         selector = ((positions > 0.0) & (positions < 1.0)).all(dim=-1)
         positions = positions * selector[..., None]
-        positions_flat = positions.view(-1, 3)
-        if not self.use_linear:
-            density_before_activation = (
-                self.mlp_base(positions_flat).view(*ray_samples.frustums.shape, -1).to(positions)
-            )
-        else:
-            x = self.encoding(positions_flat).to(positions)
-            density_before_activation = self.network(x).view(*ray_samples.frustums.shape, -1)
-
+        x = self.encoding(positions.view(-1, 3)).to(positions)
+        x = self.bundle_adjustment(
+            x.view(-1, self.num_levels, self.features_per_level),
+        ).view(-1, self.num_levels * self.features_per_level) # type: ignore
+        density_before_activation = self.network(x).view(*ray_samples.frustums.shape, -1)
         # Rectifying the density with an exponential is much more stable than a ReLU or
         # softplus, because it enables high post-activation (float32) density outputs
         # from smaller internal (float16) parameters.
@@ -140,6 +140,7 @@ class HashMLPGaussianDensityField(HashMLPDensityField):
         hidden_dim: dimension of hidden layers
         spatial_distortion: spatial distortion module
         use_linear: whether to skip the MLP and use a single linear layer instead
+        bundle_adjustment: BARF technique for adjust poses
     """
 
     aabb: Tensor
@@ -147,6 +148,7 @@ class HashMLPGaussianDensityField(HashMLPDensityField):
     def __init__(
         self,
         aabb: Tensor,
+        bundle_adjustment: HashBundleAdjustment,
         num_layers: int = 2,
         hidden_dim: int = 64,
         spatial_distortion: Optional[SpatialDistortion] = None,
@@ -163,6 +165,7 @@ class HashMLPGaussianDensityField(HashMLPDensityField):
     ) -> None:
         super().__init__(
             aabb=aabb,
+            bundle_adjustment=bundle_adjustment,
             num_layers=num_layers,
             hidden_dim=hidden_dim,
             spatial_distortion=spatial_distortion,
@@ -177,7 +180,6 @@ class HashMLPGaussianDensityField(HashMLPDensityField):
             implementation=implementation,
         )
 
-        self.features_per_level = features_per_level
         self.scale_featurization = scale_featurization
 
         self.last_dim = self.encoding.get_out_dim()
@@ -195,7 +197,6 @@ class HashMLPGaussianDensityField(HashMLPDensityField):
                     out_activation=None,
                     implementation=implementation,
                 )
-                self.mlp_base = torch.nn.Sequential(self.encoding, self.network)
             else:
                 self.network = torch.nn.Linear(self.last_dim, 1)
 
@@ -218,9 +219,11 @@ class HashMLPGaussianDensityField(HashMLPDensityField):
 
         # hash grid performs trilerp inside itself
         mean = (
-            self.encoding(mean.view(-1, 3))
-            .view(prefix_shape + [self.num_levels * self.features_per_level])  # type: ignore
-            .unflatten(-1, (self.num_levels, self.features_per_level))
+            self.bundle_adjustment(
+                self.encoding(mean.view(-1, 3))
+                .view(prefix_shape + [self.num_levels * self.features_per_level])  # type: ignore
+                .unflatten(-1, (self.num_levels, self.features_per_level))
+            )
         )  # [..., "dim", "num_levels", "features_per_level"]
         weights = erf_approx(
             1 / (8**0.5 * cov[..., None] * self.encoding.scalings.view(-1)).abs().clamp_min(EPS)  # type: ignore
