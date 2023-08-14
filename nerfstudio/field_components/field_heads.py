@@ -41,6 +41,10 @@ class FieldHeadNames(Enum):
     SDF = "sdf"
     ALPHA = "alpha"
     GRADIENT = "gradient"
+    HASH_DECAY = "hash_decay"
+    SPECULAR_TINT = "specular_tint"
+    DIFFUSE_COLOR = "diffuse_color"
+    ROUGHNESS = "roughness"
 
 
 class FieldHead(FieldComponent):
@@ -200,5 +204,5 @@ class PredNormalsFieldHead(FieldHead):
     def forward(self, in_tensor: Float[Tensor, "*bs in_dim"]) -> Float[Tensor, "*bs out_dim"]:
         """Needed to normalize the output into valid normals."""
         out_tensor = super().forward(in_tensor)
-        out_tensor = torch.nn.functional.normalize(out_tensor, dim=-1)
+        out_tensor = -torch.nn.functional.normalize(out_tensor, dim=-1)
         return out_tensor

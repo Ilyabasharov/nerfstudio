@@ -19,6 +19,7 @@ Special activation functions.
 from typing import TYPE_CHECKING
 
 import torch
+from torch import nn
 from jaxtyping import Float
 from torch import Tensor
 from torch.autograd import Function
@@ -39,6 +40,30 @@ class _TruncExp(Function):
     def backward(ctx, g):
         x = ctx.saved_tensors[0]
         return g * torch.exp(x.clamp(-15, 15))
+
+
+class ShiftedSoftplus(nn.Softplus):
+    """Shifted version of softplus activation."""
+
+    __constants__ = ['beta', 'threshold', 'shift']
+    beta: int
+    threshold: int
+    shift: float
+
+    def __init__(
+        self,
+        beta: int = 1,
+        threshold: int = 20,
+        shift: float = 0.001,
+    ) -> None:
+        super().__init__(beta=beta, threshold=threshold)
+        self.shift = shift
+
+    def forward(self, input: Tensor) -> Tensor:
+        return super().forward(input + self.shift)
+    
+    def extra_repr(self) -> str:
+        return f'beta={self.beta}, threshold={self.threshold}, shift={self.shift}'
 
 
 if TYPE_CHECKING:

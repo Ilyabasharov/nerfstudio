@@ -119,7 +119,7 @@ class ControlPanel:
             hint="Target training utilization, 0.0 is slow, 1.0 is fast. Doesn't affect final render quality",
         )
         self._max_res = ViewerSlider(
-            "Max Res", 512, 64, 2048, 100, cb_hook=rerender_cb, hint="Maximum resolution to render in viewport"
+            "Max Res", 512, 64, 4096, 100, cb_hook=rerender_cb, hint="Maximum resolution to render in viewport"
         )
         self._crop_viewport = ViewerCheckbox(
             "Enable ",

@@ -19,9 +19,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, Optional, Type
 
+import cv2
 import numpy as np
 import torch
-from PIL import Image
 
 from nerfstudio.cameras import camera_utils
 from nerfstudio.cameras.cameras import CAMERA_MODEL_TO_TYPE, Cameras, CameraType
@@ -334,8 +334,9 @@ class Nerfstudio(DataParser):
 
         if self.downscale_factor is None:
             if self.config.downscale_factor is None:
-                test_img = Image.open(data_dir / filepath)
-                h, w = test_img.size
+                path = data_dir / filepath
+                test_img = cv2.imread(str(path.absolute()))
+                h, w, _ = test_img.shape
                 max_res = max(h, w)
                 df = 0
                 while True:

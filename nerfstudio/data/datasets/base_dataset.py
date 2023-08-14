@@ -21,11 +21,11 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Dict, List
 
+import cv2
 import numpy as np
 import numpy.typing as npt
 import torch
 from jaxtyping import Float
-from PIL import Image
 from torch import Tensor
 from torch.utils.data import Dataset
 
@@ -64,12 +64,12 @@ class InputDataset(Dataset):
             image_idx: The image index in the dataset.
         """
         image_filename = self._dataparser_outputs.image_filenames[image_idx]
-        pil_image = Image.open(image_filename)
+        image: npt.NDArray[np.uint8] = cv2.imread(str(image_filename.absolute()))
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         if self.scale_factor != 1.0:
-            width, height = pil_image.size
+            height, width, _ = image.shape
             newsize = (int(width * self.scale_factor), int(height * self.scale_factor))
-            pil_image = pil_image.resize(newsize, resample=Image.BILINEAR)
-        image = np.array(pil_image, dtype="uint8")  # shape is (h, w) or (h, w, 3 or 4)
+            image = cv2.resize(image, newsize, interpolation=cv2.INTER_AREA)
         if len(image.shape) == 2:
             image = image[:, :, None].repeat(3, axis=2)
         assert len(image.shape) == 3

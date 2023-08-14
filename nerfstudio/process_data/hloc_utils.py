@@ -54,12 +54,30 @@ def run_hloc(
     colmap_dir: Path,
     camera_model: CameraModel,
     verbose: bool = False,
-    matching_method: Literal["vocab_tree", "exhaustive", "sequential"] = "vocab_tree",
+    matching_method: Literal[
+        "vocab_tree",
+        "exhaustive",
+        "sequential",
+    ] = "vocab_tree",
     feature_type: Literal[
-        "sift", "superpoint_aachen", "superpoint_max", "superpoint_inloc", "r2d2", "d2net-ss", "sosnet", "disk"
+        "sift",
+        "superpoint_aachen",
+        "superpoint_max",
+        "superpoint_inloc",
+        "r2d2",
+        "d2net-ss",
+        "sosnet",
+        "disk",
     ] = "superpoint_aachen",
     matcher_type: Literal[
-        "superglue", "superglue-fast", "NN-superpoint", "NN-ratio", "NN-mutual", "adalam"
+        "superglue",
+        "superglue-fast",
+        "NN-superpoint",
+        "NN-ratio",
+        "NN-mutual",
+        "adalam",
+        "disk+lightglue",
+        "superpoint+lightglue",
     ] = "superglue",
     num_matched: int = 50,
     refine_pixsfm: bool = False,

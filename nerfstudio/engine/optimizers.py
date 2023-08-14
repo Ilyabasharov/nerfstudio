@@ -146,6 +146,8 @@ class Optimizers:
             step: the current step
         """
         for param_group_name, scheduler in self.schedulers.items():
+            if scheduler is None:
+                continue
             scheduler.step()
             # TODO(ethan): clean this up. why is there indexing into a list?
             lr = scheduler.get_last_lr()[0]
