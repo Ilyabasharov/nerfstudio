@@ -17,8 +17,8 @@ Field for compound nerf model, adds scene contraction and image embeddings to in
 """
 
 
-from typing import Dict, Literal, Optional, Tuple, Callable
-from jaxtyping import Float
+from typing import Dict, Literal, Optional, Tuple, Callable, Union
+from jaxtyping import Int, Float
 
 import torch
 from torch import Tensor, nn
@@ -68,6 +68,8 @@ class NerfactoField(Field):
         num_semantic_classes: number of semantic classes
         use_pred_normals: whether to use predicted normals
         use_average_appearance_embedding: whether to use average appearance embedding or zeros for inference
+        use_appearance_embedding: whether to use use_appearance_embedding or predict scales to bottleneck vector
+        shift_scale_out_dim: if not use use_appearance_embedding, dim of out shift and scale vectors
         spatial_distortion: spatial distortion to apply to the scene
         compute_hash_regularization: whether to compute regularization on hash weights
         regularize_function: type of regularization
@@ -94,6 +96,8 @@ class NerfactoField(Field):
         hidden_dim_color: int = 64,
         hidden_dim_transient: int = 64,
         appearance_embedding_dim: int = 32,
+        use_appearance_embedding: bool = True,
+        shift_scale_out_dim: Optional[int] = None,
         transient_embedding_dim: int = 16,
         use_transient_embedding: bool = False,
         use_semantics: bool = False,
@@ -122,6 +126,8 @@ class NerfactoField(Field):
         self.appearance_embedding_dim = appearance_embedding_dim
         self.embedding_appearance = Embedding(self.num_images, self.appearance_embedding_dim)
         self.use_average_appearance_embedding = use_average_appearance_embedding
+        self.use_appearance_embedding = use_appearance_embedding
+        self.shift_scale_out_dim = shift_scale_out_dim
         self.use_transient_embedding = use_transient_embedding
         self.use_semantics = use_semantics
         self.use_pred_normals = use_pred_normals
@@ -203,8 +209,12 @@ class NerfactoField(Field):
             )
             self.field_head_pred_normals = PredNormalsFieldHead(in_dim=self.mlp_pred_normals.get_out_dim())
 
+        mlp_head_in_dim = self.direction_encoding.get_out_dim() + self.geo_feat_dim
+        if self.use_appearance_embedding:
+            mlp_head_in_dim += self.appearance_embedding_dim
+
         self.mlp_head = MLP(
-            in_dim=self.direction_encoding.get_out_dim() + self.geo_feat_dim + self.appearance_embedding_dim,
+            in_dim=mlp_head_in_dim,
             num_layers=num_layers_color,
             layer_width=hidden_dim_color,
             out_dim=3,
@@ -212,6 +222,20 @@ class NerfactoField(Field):
             out_activation=nn.Sigmoid(),
             implementation=implementation,
         )
+
+        if not self.use_appearance_embedding:
+            if self.shift_scale_out_dim is None:
+                self.shift_scale_out_dim = self.geo_feat_dim
+
+            self.affine_mlp = MLP(
+                in_dim=self.appearance_embedding_dim,
+                num_layers=2,
+                layer_width=128,
+                out_dim=self.shift_scale_out_dim * 2,
+                activation=nn.ReLU(),
+                out_activation=None,
+                implementation=implementation,
+            )
 
     def get_density(self, ray_samples: RaySamples) -> Tuple[Tensor, Tensor]:
         """Computes and returns the densities."""
@@ -241,6 +265,32 @@ class NerfactoField(Field):
         density = trunc_exp(density_before_activation.to(positions))
         density = density * selector[..., None]
         return density, base_mlp_out
+    
+    def _get_appearance_embedding(
+        self,
+        camera_indices: Int[Tensor, "*bs"],
+    ) -> Tuple[
+        Float[Tensor, "*bs appearance_embedding_dim"],
+        Union[float, Float[Tensor, "*bs geo_feat_dim"]],
+        Union[float, Float[Tensor, "*bs geo_feat_dim"]],
+    ]:
+        """Appearance prediction."""
+        scale, shift = 1, 0
+        if self.training:
+            embedded_appearance = self.embedding_appearance(camera_indices)
+            if not self.use_appearance_embedding:
+                output = self.affine_mlp(embedded_appearance.view(-1, self.appearance_embedding_dim))
+                scale, shift = torch.split(output, [self.shift_scale_out_dim, self.shift_scale_out_dim], dim=-1)  # type: ignore
+                scale = trunc_exp(scale)
+        else:
+            multiplier = self.embedding_appearance.mean(dim=0) if self.use_average_appearance_embedding else 0.0
+            embedded_appearance = torch.ones(
+                (*camera_indices.shape, self.appearance_embedding_dim),
+                device=camera_indices.device,
+            ) * multiplier
+            
+        return embedded_appearance, scale, shift
+
 
     def get_outputs(
         self,
@@ -260,17 +310,7 @@ class NerfactoField(Field):
         outputs_shape = ray_samples.frustums.directions.shape[:-1]
 
         # appearance
-        if self.training:
-            embedded_appearance = self.embedding_appearance(camera_indices)
-        else:
-            if self.use_average_appearance_embedding:
-                embedded_appearance = torch.ones(
-                    (*directions.shape[:-1], self.appearance_embedding_dim), device=directions.device
-                ) * self.embedding_appearance.mean(dim=0)
-            else:
-                embedded_appearance = torch.zeros(
-                    (*directions.shape[:-1], self.appearance_embedding_dim), device=directions.device
-                )
+        embedded_appearance, scale, shift = self._get_appearance_embedding(camera_indices)
 
         # transients
         if self.use_transient_embedding and self.training:
@@ -306,16 +346,19 @@ class NerfactoField(Field):
             x = self.mlp_pred_normals(pred_normals_inp).view(*outputs_shape, -1).to(directions)
             outputs[FieldHeadNames.PRED_NORMALS] = self.field_head_pred_normals(x)
 
-        h = torch.cat(
-            [
-                d,
-                density_embedding.view(-1, self.geo_feat_dim),
+        inputs_mlp_head = [
+            d,
+            density_embedding.view(-1, self.geo_feat_dim) * scale + shift,
+        ]
+
+        if self.use_appearance_embedding:
+            inputs_mlp_head.append(
                 embedded_appearance.view(-1, self.appearance_embedding_dim),
-            ],
-            dim=-1,
-        )
-        rgb = self.mlp_head(h).view(*outputs_shape, -1).to(directions)
-        outputs.update({FieldHeadNames.RGB: rgb})
+            )
+
+        outputs[FieldHeadNames.RGB] = self.mlp_head(
+            torch.cat(inputs_mlp_head, dim=-1),
+        ).view(*outputs_shape, -1).to(directions)
 
         if self.compute_hash_regularization:
             outputs[FieldHeadNames.HASH_DECAY] = self.mlp_base_grid.regularize_hash_pyramid(self.regularize_function)

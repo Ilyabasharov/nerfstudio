@@ -53,6 +53,7 @@ class ZipRefNerfactoField(ZipNerfactoField, RefNerfactoField):
         num_semantic_classes: number of semantic classes
         use_pred_normals: whether to use predicted normals
         use_average_appearance_embedding: whether to use average appearance embedding or zeros for inference
+        use_appearance_embedding: whether to use use_appearance_embedding or predict scales to bottleneck vector
         spatial_distortion: spatial distortion to apply to the scene
         regularize_function: type of regularization
         deg_view: degree of encoding for viewdirs or refdirs
@@ -99,6 +100,7 @@ class ZipRefNerfactoField(ZipNerfactoField, RefNerfactoField):
         pass_semantic_gradients: bool = False,
         use_pred_normals: bool = True,
         use_average_appearance_embedding: bool = False,
+        use_appearance_embedding: bool = False,
         spatial_distortion: Optional[LinearizedSceneContraction] = None,
         regularize_function: Callable[[Tensor], Tensor] = torch.square,
         scale_featurization: bool = True,
@@ -143,6 +145,7 @@ class ZipRefNerfactoField(ZipNerfactoField, RefNerfactoField):
             pass_semantic_gradients=pass_semantic_gradients,
             use_pred_normals=use_pred_normals,
             use_average_appearance_embedding=use_average_appearance_embedding,
+            use_appearance_embedding=use_appearance_embedding,
             spatial_distortion=spatial_distortion,
             regularize_function=regularize_function,
             compute_hash_regularization=compute_hash_regularization,
@@ -185,9 +188,11 @@ class ZipRefNerfactoField(ZipNerfactoField, RefNerfactoField):
             pass_semantic_gradients=pass_semantic_gradients,
             use_pred_normals=use_pred_normals,
             use_average_appearance_embedding=use_average_appearance_embedding,
+            use_appearance_embedding=use_appearance_embedding,
             spatial_distortion=spatial_distortion,
             scale_featurization=scale_featurization,
             regularize_function=regularize_function,
             compute_hash_regularization=compute_hash_regularization,
             implementation=implementation,
         )
+

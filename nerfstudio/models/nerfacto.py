@@ -121,6 +121,8 @@ class NerfactoModelConfig(ModelConfig):
     """Regularize function for hash pyramid weights."""
     use_average_appearance_embedding: bool = True
     """Whether to use average appearance embedding or zeros for inference."""
+    use_appearance_embedding: bool = False
+    """Whether to use use_appearance_embedding or predict scales to bottleneck vector."""
     proposal_weights_anneal_slope: float = 10.0
     """Slope of the annealing function for the proposal weights."""
     proposal_weights_anneal_max_num_iters: int = 1000
@@ -131,7 +133,7 @@ class NerfactoModelConfig(ModelConfig):
     """Whether to predict normals or not."""
     disable_scene_contraction: bool = False
     """Whether to disable scene contraction or not."""
-    use_gradient_scaling: bool = False
+    use_gradient_scaling: bool = True
     """Use gradient scaler where the gradients are lower for points closer to the camera."""
     bundle_adjust: bool = False
     """Whether to bundle adjust (BARF)"""
@@ -187,6 +189,7 @@ class NerfactoModel(Model):
             num_images=self.num_train_data,
             use_pred_normals=self.config.predict_normals,
             use_average_appearance_embedding=self.config.use_average_appearance_embedding,
+            use_appearance_embedding=self.config.use_appearance_embedding,
             appearance_embedding_dim=self.config.appearance_embed_dim,
             regularize_function=self.regularize_function,
             compute_hash_regularization=self.config.compute_hash_regularization,

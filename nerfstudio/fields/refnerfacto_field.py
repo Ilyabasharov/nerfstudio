@@ -61,6 +61,7 @@ class RefNerfactoField(NerfactoField):
         num_semantic_classes: number of semantic classes
         use_pred_normals: whether to use predicted normals
         use_average_appearance_embedding: whether to use average appearance embedding or zeros for inference
+        use_appearance_embedding: whether to use use_appearance_embedding or predict scales to bottleneck vector
         spatial_distortion: spatial distortion to apply to the scene
         regularize_function: type of regularization
         deg_view: degree of encoding for viewdirs or refdirs
@@ -106,6 +107,7 @@ class RefNerfactoField(NerfactoField):
         pass_semantic_gradients: bool = False,
         use_pred_normals: bool = False,
         use_average_appearance_embedding: bool = False,
+        use_appearance_embedding: bool = False,
         spatial_distortion: Optional[SpatialDistortion] = None,
         regularize_function: Callable[[Tensor], Tensor] = torch.square,
         compute_hash_regularization: bool = True,
@@ -147,6 +149,8 @@ class RefNerfactoField(NerfactoField):
             pass_semantic_gradients=pass_semantic_gradients,
             use_pred_normals=use_pred_normals,
             use_average_appearance_embedding=use_average_appearance_embedding,
+            use_appearance_embedding=use_appearance_embedding,
+            shift_scale_out_dim=bottleneck_width,
             spatial_distortion=spatial_distortion,
             compute_hash_regularization=compute_hash_regularization,
             regularize_function=regularize_function,
@@ -210,8 +214,10 @@ class RefNerfactoField(NerfactoField):
                 implementation=implementation,
             )
 
-        mlp_head_in_dim = appearance_embedding_dim + \
-            bottleneck_width
+        mlp_head_in_dim = bottleneck_width
+        
+        if self.use_appearance_embedding:
+            mlp_head_in_dim += appearance_embedding_dim
 
         if use_n_dot_v:
             mlp_head_in_dim += 1
@@ -219,6 +225,8 @@ class RefNerfactoField(NerfactoField):
         if use_ide_enc:
             self.ide_encoding = IDEncoding(deg_view=deg_view)
             mlp_head_in_dim += self.ide_encoding.get_out_dim()
+        else:
+            mlp_head_in_dim += self.direction_encoding.get_out_dim()
 
         self.mlp_head = MLP(
             in_dim=mlp_head_in_dim,
@@ -251,17 +259,7 @@ class RefNerfactoField(NerfactoField):
         outputs_shape = ray_samples.frustums.directions.shape[:-1]
 
         # appearance
-        if self.training:
-            embedded_appearance = self.embedding_appearance(camera_indices)
-        else:
-            if self.use_average_appearance_embedding:
-                embedded_appearance = torch.ones(
-                    (*directions_flat.shape[:-1], self.appearance_embedding_dim), device=directions_flat.device
-                ) * self.embedding_appearance.mean(dim=0)
-            else:
-                embedded_appearance = torch.zeros(
-                    (*directions_flat.shape[:-1], self.appearance_embedding_dim), device=directions_flat.device
-                )
+        embedded_appearance, scale, shift = self._get_appearance_embedding(camera_indices)
 
         # transients
         if self.use_transient_embedding and self.training:
@@ -337,10 +335,14 @@ class RefNerfactoField(NerfactoField):
         # bottleneck
         pred_bottleneck = self.mlp_pred_bottleneck(inputs_mlps)
 
-        mlp_head_inputs = [
-            embedded_appearance.view(-1, self.appearance_embedding_dim),
-            pred_bottleneck,
+        inputs_mlp_head = [
+            pred_bottleneck * scale + shift,
         ]
+
+        if self.use_appearance_embedding:
+            inputs_mlp_head.append(
+                embedded_appearance.view(-1, self.appearance_embedding_dim),
+            )
 
         # Encode view (or reflection) directions.
         if self.use_ide_enc:
@@ -355,7 +357,7 @@ class RefNerfactoField(NerfactoField):
                     pred_normals, # type: ignore
                 )
 
-            mlp_head_inputs.append(
+            inputs_mlp_head.append(
                 self.ide_encoding(
                     ide_encoding_input.view(-1, 3),
                     pred_roughness.view(-1, 1), # type: ignore
@@ -369,15 +371,15 @@ class RefNerfactoField(NerfactoField):
                 dim=-1, keepdims=True,
             ).view(-1, 1)
 
-            mlp_head_inputs.append(dotprod)
+            inputs_mlp_head.append(dotprod)
 
         # Concatenate bottleneck, directional encoding, dot product and appearence encoding
-        mlp_head_inputs = torch.cat(mlp_head_inputs, dim=-1)
+        inputs_mlp_head = torch.cat(inputs_mlp_head, dim=-1)
 
         # If using diffuse/specular colors, then `rgb` is treated as linear
         # specular color. Otherwise it's treated as the color itself.
         rgb = torch.nn.functional.sigmoid(
-            self.mlp_head(mlp_head_inputs) * \
+            self.mlp_head(inputs_mlp_head) * \
             self.rgb_premultiplier + \
             self.rgb_bias
         )
@@ -398,7 +400,7 @@ class RefNerfactoField(NerfactoField):
         # Apply padding, mapping color to [-rgb_padding, 1+rgb_padding].
         rgb = rgb * (1 + 2 * self.rgb_padding) - self.rgb_padding
 
-        outputs.update({FieldHeadNames.RGB: rgb.view(*outputs_shape, -1).to(directions_flat)})
+        outputs[FieldHeadNames.RGB] = rgb.view(*outputs_shape, -1).to(directions_flat)
 
         if self.compute_hash_regularization:
             outputs[FieldHeadNames.HASH_DECAY] = self.mlp_base_grid.regularize_hash_pyramid(self.regularize_function)

@@ -321,11 +321,9 @@ method_configs["ziprefnerfacto"] = TrainerConfig(
     steps_per_save=2000,
     max_num_iterations=70000,
     mixed_precision=True,
-    use_grad_scaler=False,
-    gradient_accumulation_steps=2,
     pipeline=VanillaPipelineConfig(
         datamanager=VanillaDataManagerConfig(
-            dataparser=NerfstudioDataParserConfig(train_split_fraction=0.99),
+            dataparser=NerfstudioDataParserConfig(),
             train_num_rays_per_batch=5096,
             eval_num_rays_per_batch=4096,
             camera_optimizer=CameraOptimizerConfig(

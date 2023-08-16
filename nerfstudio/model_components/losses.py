@@ -634,7 +634,7 @@ def scale_gradients_by_distance_squared(
     """
     out = {}
     ray_dist = (ray_samples.frustums.starts + ray_samples.frustums.ends) / 2
-    scaling = torch.square(ray_dist).clamp(0, 1)
+    scaling = ray_dist.square_().clamp_(0, 1)
     for key, value in field_outputs.items():
         out[key], _ = cast(Tuple[Tensor, Tensor], _GradientScaler.apply(value, scaling))
     return out
@@ -659,9 +659,11 @@ class CharbonnierLoss(nn.Module):
     https://arxiv.org/pdf/2111.12077.pdf
     """
 
+    __constants__ = ["padding_square"]
+    padding_square: float
+
     def __init__(self, padding: float = 1e-3):
         super().__init__()
-
         self.padding_square = padding ** 2
 
     def forward(
@@ -688,9 +690,11 @@ class RawNeRFLoss(nn.Module):
     https://arxiv.org/pdf/2111.13679.pdf
     """
 
+    __constants__ = ["padding_square"]
+    padding_square: float
+
     def __init__(self, padding: float = 1e-3):
         super().__init__()
-
         self.padding_square = padding ** 2
 
     def forward(

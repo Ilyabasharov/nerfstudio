@@ -37,7 +37,8 @@ class ZipRefNerfactoModelConfig(ZipNerfactoModelConfig, RefNerfactoModelConfig):
     """Whether to predict normals or not."""
     supervise_pred_normals_by_density: bool = False
     """Whether to supervise predicted normals by density."""
-
+    use_appearance_embedding: bool = False
+    """whether to use use_appearance_embedding or predict scales to bottleneck vector."""
 
 
 class ZipRefNerfactoModel(ZipNerfactoModel):
@@ -76,6 +77,7 @@ class ZipRefNerfactoModel(ZipNerfactoModel):
             num_images=self.num_train_data,
             use_pred_normals=self.config.predict_normals,
             use_average_appearance_embedding=self.config.use_average_appearance_embedding,
+            use_appearance_embedding=self.config.use_appearance_embedding,
             appearance_embedding_dim=self.config.appearance_embed_dim,
             scale_featurization=self.config.scale_featurization,
             regularize_function=self.regularize_function,

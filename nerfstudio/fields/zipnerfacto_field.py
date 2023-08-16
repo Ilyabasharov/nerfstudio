@@ -56,6 +56,7 @@ class ZipNerfactoField(NerfactoField):
         num_semantic_classes: number of semantic classes
         use_pred_normals: whether to use predicted normals
         use_average_appearance_embedding: whether to use average appearance embedding or zeros for inference
+        use_appearance_embedding: whether to use use_appearance_embedding or predict scales to bottleneck vector
         spatial_distortion: spatial distortion to apply to the scene
         scale_featurization: scale featurization from appendix of ZipNeRF
         regularize_function: type of regularization
@@ -89,6 +90,7 @@ class ZipNerfactoField(NerfactoField):
         pass_semantic_gradients: bool = False,
         use_pred_normals: bool = False,
         use_average_appearance_embedding: bool = False,
+        use_appearance_embedding: bool = False,
         spatial_distortion: Optional[SpatialDistortion] = None,
         scale_featurization: bool = True,
         regularize_function: Callable[[Tensor], Tensor] = torch.square,
@@ -112,6 +114,7 @@ class ZipNerfactoField(NerfactoField):
             hidden_dim_color=hidden_dim_color,
             hidden_dim_transient=hidden_dim_transient,
             appearance_embedding_dim=appearance_embedding_dim,
+            use_appearance_embedding=use_appearance_embedding,
             transient_embedding_dim=transient_embedding_dim,
             use_transient_embedding=use_transient_embedding,
             use_semantics=use_semantics,
