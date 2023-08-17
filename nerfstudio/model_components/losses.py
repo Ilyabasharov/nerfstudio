@@ -17,7 +17,7 @@ Collection of Losses.
 """
 
 from enum import Enum
-from typing import Dict, Literal, Optional, Tuple, cast, List
+from typing import Dict, Literal, Optional, Tuple, cast, List, FrozenSet
 
 import torch
 from jaxtyping import Bool, Float
@@ -621,6 +621,7 @@ class _GradientScaler(torch.autograd.Function):  # typing: ignore
 def scale_gradients_by_distance_squared(
     field_outputs: Dict[FieldHeadNames, torch.Tensor],
     ray_samples: RaySamples,
+    field_names_exclude: FrozenSet[FieldHeadNames] = frozenset(),
 ) -> Dict[FieldHeadNames, torch.Tensor]:
     """
     Scale gradients by the ray distance to the pixel
@@ -636,7 +637,10 @@ def scale_gradients_by_distance_squared(
     ray_dist = (ray_samples.frustums.starts + ray_samples.frustums.ends) / 2
     scaling = ray_dist.square_().clamp_(0, 1)
     for key, value in field_outputs.items():
-        out[key], _ = cast(Tuple[Tensor, Tensor], _GradientScaler.apply(value, scaling))
+        if key in field_names_exclude:
+            out[key] = value
+        else:
+            out[key], _ = cast(Tuple[Tensor, Tensor], _GradientScaler.apply(value, scaling))
     return out
 
 

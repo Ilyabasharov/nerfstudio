@@ -278,6 +278,9 @@ class NerfactoModel(Model):
         self.lpips = LearnedPerceptualImagePatchSimilarity(normalize=True)
         self.step = 0
 
+        # exclude from gradient scaling
+        self.field_names_exclude = frozenset([FieldHeadNames.HASH_DECAY, ])
+
     def get_param_groups(self) -> Dict[str, List[Parameter]]:
         param_groups = {}
         param_groups["proposal_networks"] = list(self.proposal_networks.parameters())
@@ -333,8 +336,13 @@ class NerfactoModel(Model):
             ray_bundle=ray_bundle,
             compute_normals=self.config.predict_normals,
         )
+
         if self.config.use_gradient_scaling:
-            field_outputs = scale_gradients_by_distance_squared(field_outputs, ray_samples)
+            field_outputs = scale_gradients_by_distance_squared(
+                field_outputs=field_outputs,
+                ray_samples=ray_samples,
+                field_names_exclude=self.field_names_exclude,
+            )
 
         weights = ray_samples.get_weights(field_outputs[FieldHeadNames.DENSITY])
         weights_list.append(weights)

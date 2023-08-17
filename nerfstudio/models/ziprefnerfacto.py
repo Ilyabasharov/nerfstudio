@@ -35,7 +35,7 @@ class ZipRefNerfactoModelConfig(ZipNerfactoModelConfig, RefNerfactoModelConfig):
 
     predict_normals: bool = True
     """Whether to predict normals or not."""
-    supervise_pred_normals_by_density: bool = False
+    supervise_pred_normals_by_density: bool = True
     """Whether to supervise predicted normals by density."""
     use_appearance_embedding: bool = False
     """whether to use use_appearance_embedding or predict scales to bottleneck vector."""

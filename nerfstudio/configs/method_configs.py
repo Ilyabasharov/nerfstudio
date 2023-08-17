@@ -286,7 +286,7 @@ method_configs["refnerfacto"] = TrainerConfig(
     mixed_precision=True,
     pipeline=VanillaPipelineConfig(
         datamanager=VanillaDataManagerConfig(
-            dataparser=NerfstudioDataParserConfig(downscale_factor=2, train_split_fraction=0.996),
+            dataparser=NerfstudioDataParserConfig(),
             train_num_rays_per_batch=18384,
             eval_num_rays_per_batch=4096,
             camera_optimizer=CameraOptimizerConfig(
