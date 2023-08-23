@@ -173,7 +173,8 @@ class PixelSampler:
             key: value[c, y, x] for key, value in batch.items() if key != "image_idx" and value is not None
         }
 
-        assert collated_batch["image"].shape[0] == num_rays_per_batch
+        assert collated_batch["image"].shape[0] == num_rays_per_batch, \
+            f"Got collared {collated_batch['image'].shape[0]}, but by config {num_rays_per_batch} rays"
 
         # Needed to correct the random indices to their actual camera idx locations.
         indices[:, 0] = batch["image_idx"][c]

@@ -276,7 +276,6 @@ class NerfactoModel(Model):
         self.psnr = PeakSignalNoiseRatio(data_range=1.0)
         self.ssim = structural_similarity_index_measure
         self.lpips = LearnedPerceptualImagePatchSimilarity(normalize=True)
-        self.step = 0
 
         # exclude from gradient scaling
         self.field_names_exclude = frozenset([FieldHeadNames.HASH_DECAY, ])
@@ -298,7 +297,6 @@ class NerfactoModel(Model):
             def set_anneal(step):
                 # https://arxiv.org/pdf/2111.12077.pdf eq. 18
                 train_frac = np.clip(step / N, 0, 1)
-                self.step = step
 
                 def bias(x, b):
                     return b * x / ((b - 1) * x + 1)
@@ -320,13 +318,15 @@ class NerfactoModel(Model):
                     func=self.proposal_sampler.step_cb,
                 )
             )
-            callbacks.append(
-                TrainingCallback(
-                    where_to_run=[TrainingCallbackLocation.AFTER_TRAIN_ITERATION],
-                    update_every_num_iters=1,
-                    func=self.bundle_adjustment.step_cb,
-                )
+
+        callbacks.append(
+            TrainingCallback(
+                where_to_run=[TrainingCallbackLocation.AFTER_TRAIN_ITERATION],
+                update_every_num_iters=1,
+                func=self.bundle_adjustment.step_cb,
             )
+        )
+
         return callbacks
 
     def get_outputs(self, ray_bundle: RayBundle):
@@ -349,16 +349,13 @@ class NerfactoModel(Model):
         ray_samples_list.append(ray_samples)
 
         rgb = self.renderer_rgb(rgb=field_outputs[FieldHeadNames.RGB], weights=weights)
-        with torch.no_grad():
-            depth = self.renderer_depth(weights=weights, ray_samples=ray_samples)
-        expected_depth = self.renderer_expected_depth(weights=weights, ray_samples=ray_samples)
+        depth = self.renderer_depth(weights=weights, ray_samples=ray_samples)
         accumulation = self.renderer_accumulation(weights=weights)
 
         outputs = {
             "rgb": rgb,
             "accumulation": accumulation,
-            "depth": depth,
-            "expected_depth": expected_depth,
+            f"prop_depth_{self.config.num_proposal_iterations + 1}": depth,
         }
 
         if FieldHeadNames.ROUGHNESS in field_outputs:
@@ -384,6 +381,7 @@ class NerfactoModel(Model):
             pred_normals = self.renderer_normals(field_outputs[FieldHeadNames.PRED_NORMALS], weights=weights)
             outputs["normals"] = self.normals_shader(normals)
             outputs["pred_normals"] = self.normals_shader(pred_normals)
+
         # These use a lot of GPU memory, so we avoid storing them for eval.
         if self.training:
             outputs["weights_list"] = weights_list
@@ -395,10 +393,10 @@ class NerfactoModel(Model):
                     outputs["hash_decay"].append(proposal_network.get_outputs()[FieldHeadNames.HASH_DECAY])  # type: ignore
                 outputs["hash_decay"].append(field_outputs[FieldHeadNames.HASH_DECAY])
 
-        if self.training and self.config.predict_normals:
-            outputs["rendered_orientation_loss"] = orientation_loss(
-                weights.detach(), field_outputs[FieldHeadNames.NORMALS], ray_bundle.directions
-            )
+            if self.config.predict_normals:
+                outputs["rendered_orientation_loss"] = orientation_loss(
+                    weights.detach(), field_outputs[FieldHeadNames.NORMALS], ray_bundle.directions
+                )
 
             if self.config.supervise_pred_normals_by_density:
                 outputs["rendered_pred_normal_loss"] = pred_normal_loss(
@@ -408,7 +406,10 @@ class NerfactoModel(Model):
                 )
 
         for i in range(self.config.num_proposal_iterations):
-            outputs[f"prop_depth_{i}"] = self.renderer_depth(weights=weights_list[i], ray_samples=ray_samples_list[i])
+            outputs[f"prop_depth_{i}"] = self.renderer_depth(
+                weights=weights_list[i],
+                ray_samples=ray_samples_list[i],
+            )
 
         return outputs
 
@@ -465,7 +466,7 @@ class NerfactoModel(Model):
         gt_rgb = self.renderer_rgb.blend_background(gt_rgb)
         acc = colormaps.apply_colormap(outputs["accumulation"])
         depth = colormaps.apply_depth_colormap(
-            outputs["depth"],
+            outputs[f"prop_depth_{self.config.num_proposal_iterations + 1}"],
             accumulation=outputs["accumulation"],
         )
 
@@ -482,7 +483,7 @@ class NerfactoModel(Model):
         lpips = 0. # self.lpips(gt_rgb, predicted_rgb)
 
         # all of these metrics will be logged as scalars
-        metrics_dict = {"psnr": float(psnr.item()), "ssim": float(ssim)}  # type: ignore
+        metrics_dict = {"psnr": psnr.item(), "ssim": ssim.item()}  # type: ignore
         metrics_dict["lpips"] = float(lpips)
 
         images_dict = {

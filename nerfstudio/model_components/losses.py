@@ -36,7 +36,9 @@ EPS = 1.0e-7
 
 # Sigma scale factor from Urban Radiance Fields (Rematas et al., 2022)
 URF_SIGMA_SCALE_FACTOR = 3.0
-DEPTH_METRIC = 1
+
+# Depth ranking loss
+FORCE_PSEUDODEPTH_LOSS = False
 
 
 class DepthLossType(Enum):
@@ -44,6 +46,9 @@ class DepthLossType(Enum):
 
     DS_NERF = 1
     URF = 2
+
+
+FORCE_PSEUDODEPTH_LOSS = False
 
 
 def outer(
@@ -185,7 +190,7 @@ def zipnerf_loss(
 
         # difference between adjacent interpolated values
         w_s = torch.diff(cdf_interp, dim=-1)
-        loss += ((w_s - wp).clamp_min(0) ** 2 / (wp + 1e-5)).mean()
+        loss += ((w_s.detach() - wp).clamp_min(0) ** 2 / (wp + 1e-5)).mean()
     return loss
 
 
@@ -644,13 +649,16 @@ def scale_gradients_by_distance_squared(
     return out
 
 
-def depth_ranking_loss(rendered_depth, gt_depth):
+def depth_ranking_loss(
+    rendered_depth: Tensor,
+    gt_depth: Tensor,
+    m: float = 1e-4,
+) -> Tensor:
     """
     Depth ranking loss as described in the SparseNeRF paper
     Assumes that the layout of the batch comes from a PairPixelSampler, so that adjacent samples in the gt_depth
     and rendered_depth are from pixels with a radius of each other
     """
-    m = 1e-4
     dpt_diff = gt_depth[::2, :] - gt_depth[1::2, :]
     out_diff = rendered_depth[::2, :] - rendered_depth[1::2, :] + m
     differing_signs = torch.sign(dpt_diff) != torch.sign(out_diff)

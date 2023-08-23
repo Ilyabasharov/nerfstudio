@@ -39,6 +39,8 @@ class ZipRefNerfactoModelConfig(ZipNerfactoModelConfig, RefNerfactoModelConfig):
     """Whether to supervise predicted normals by density."""
     use_appearance_embedding: bool = False
     """whether to use use_appearance_embedding or predict scales to bottleneck vector."""
+    appearance_embed_dim: int = 128
+    """Dimension of the appearance embedding."""
 
 
 class ZipRefNerfactoModel(ZipNerfactoModel):

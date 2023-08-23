@@ -58,6 +58,7 @@ from nerfstudio.models.nerfacto import NerfactoModelConfig
 from nerfstudio.models.zipnerfacto import ZipNerfactoModelConfig
 from nerfstudio.models.refnerfacto import RefNerfactoModelConfig
 from nerfstudio.models.ziprefnerfacto import ZipRefNerfactoModelConfig
+from nerfstudio.models.depth_ziprefnerfacto import DepthZipRefNerfactoModelConfig
 from nerfstudio.models.neus import NeuSModelConfig
 from nerfstudio.models.neus_facto import NeuSFactoModelConfig
 from nerfstudio.models.semantic_nerfw import SemanticNerfWModelConfig
@@ -85,6 +86,7 @@ descriptions = {
     "zipnerfacto": "Implementation of ZipNerfacto. (slow)",
     "refnerfacto": "Implementation of RefNerfacto.",
     "ziprefnerfacto": "Implementation of ZipRefNerfacto.",
+    "depth-ziprefnerfacto": "Implementation of ZipRefNerfacto with depth supervision.",
 }
 
 method_configs["nerfacto"] = TrainerConfig(
@@ -324,7 +326,7 @@ method_configs["ziprefnerfacto"] = TrainerConfig(
     pipeline=VanillaPipelineConfig(
         datamanager=VanillaDataManagerConfig(
             dataparser=NerfstudioDataParserConfig(),
-            train_num_rays_per_batch=5096,
+            train_num_rays_per_batch=4896,
             eval_num_rays_per_batch=4096,
             camera_optimizer=CameraOptimizerConfig(
                 mode="SO3xR3",
@@ -344,7 +346,46 @@ method_configs["ziprefnerfacto"] = TrainerConfig(
             "scheduler": None,
         },
         "fields": {
-            "optimizer": RAdamOptimizerConfig(lr=3e-3, eps=1e-15),
+            "optimizer": RAdamOptimizerConfig(lr=1e-2, eps=1e-15),
+            "scheduler": ExponentialDecaySchedulerConfig(warmup_steps=500, lr_final=5e-5, max_steps=70000),
+        },
+    },
+    viewer=ViewerConfig(num_rays_per_chunk=1 << 12),
+    vis="viewer",
+)
+
+method_configs["depth-ziprefnerfacto"] = TrainerConfig(
+    method_name="depth-ziprefnerfacto",
+    steps_per_eval_batch=500,
+    steps_per_save=2000,
+    max_num_iterations=70000,
+    mixed_precision=True,
+    pipeline=VanillaPipelineConfig(
+        datamanager=VanillaDataManagerConfig(
+            _target=VanillaDataManager[DepthDataset],
+            pixel_sampler=PairPixelSamplerConfig(num_rays_per_batch=3500),
+            dataparser=NerfstudioDataParserConfig(),
+            train_num_rays_per_batch=3500,
+            eval_num_rays_per_batch=3500,
+            camera_optimizer=CameraOptimizerConfig(
+                mode="SO3xR3",
+                optimizer=RAdamOptimizerConfig(lr=5e-6, eps=1e-8, weight_decay=1e-2),
+                scheduler=ExponentialDecaySchedulerConfig(lr_final=1e-6, max_steps=70000),
+            ),
+        ),
+        model=DepthZipRefNerfactoModelConfig(
+            eval_num_rays_per_chunk=1 << 12,
+            hidden_dim=128,
+            hidden_dim_color=128,
+        ),
+    ),
+    optimizers={
+        "proposal_networks": {
+            "optimizer": AdamOptimizerConfig(lr=1e-2, eps=1e-15),
+            "scheduler": None,
+        },
+        "fields": {
+            "optimizer": RAdamOptimizerConfig(lr=1e-2, eps=1e-15),
             "scheduler": ExponentialDecaySchedulerConfig(warmup_steps=500, lr_final=5e-5, max_steps=70000),
         },
     },

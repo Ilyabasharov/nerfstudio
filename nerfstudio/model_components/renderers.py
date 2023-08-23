@@ -325,7 +325,13 @@ class DepthRenderer(nn.Module):
         method: Depth calculation method.
     """
 
-    def __init__(self, method: Literal["median", "expected"] = "median") -> None:
+    __constants__ = ["method"]
+    method: str
+
+    def __init__(
+        self,
+        method: Literal["median", "expected"] = "median",
+    ) -> None:
         super().__init__()
         self.method = method
 
