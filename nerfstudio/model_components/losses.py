@@ -48,9 +48,6 @@ class DepthLossType(Enum):
     URF = 2
 
 
-FORCE_PSEUDODEPTH_LOSS = False
-
-
 def outer(
     t0_starts: Float[Tensor, "*batch num_samples_0"],
     t0_ends: Float[Tensor, "*batch num_samples_0"],

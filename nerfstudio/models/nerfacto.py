@@ -330,14 +330,17 @@ class NerfactoModel(Model):
         return callbacks
 
     def get_outputs(self, ray_bundle: RayBundle):
-        ray_samples, weights_list, ray_samples_list = self.proposal_sampler(ray_bundle, density_fns=self.density_fns)
+        ray_samples, weights_list, ray_samples_list = self.proposal_sampler(
+            ray_bundle,
+            density_fns=self.density_fns,
+        )
         field_outputs = self.field.forward(
             ray_samples,
             ray_bundle=ray_bundle,
             compute_normals=self.config.predict_normals,
         )
 
-        if self.config.use_gradient_scaling:
+        if self.training and self.config.use_gradient_scaling:
             field_outputs = scale_gradients_by_distance_squared(
                 field_outputs=field_outputs,
                 ray_samples=ray_samples,
@@ -369,7 +372,7 @@ class NerfactoModel(Model):
                 rgb=field_outputs[FieldHeadNames.DIFFUSE_COLOR],
                 weights=weights,
             )
-        
+
         if FieldHeadNames.SPECULAR_TINT in field_outputs:
             outputs["specular_tint"] = self.renderer_rgb(
                 rgb=field_outputs[FieldHeadNames.SPECULAR_TINT],
@@ -377,8 +380,14 @@ class NerfactoModel(Model):
             )
 
         if self.config.predict_normals:
-            normals = self.renderer_normals(normals=field_outputs[FieldHeadNames.NORMALS], weights=weights)
-            pred_normals = self.renderer_normals(field_outputs[FieldHeadNames.PRED_NORMALS], weights=weights)
+            normals = self.renderer_normals(
+                normals=field_outputs[FieldHeadNames.NORMALS],
+                weights=weights,
+            )
+            pred_normals = self.renderer_normals(
+                field_outputs[FieldHeadNames.PRED_NORMALS],
+                weights=weights,
+            )
             outputs["normals"] = self.normals_shader(normals)
             outputs["pred_normals"] = self.normals_shader(pred_normals)
 
@@ -388,9 +397,10 @@ class NerfactoModel(Model):
             outputs["ray_samples_list"] = ray_samples_list
 
             if self.config.compute_hash_regularization:
-                outputs["hash_decay"] = []
-                for proposal_network in self.proposal_networks:
-                    outputs["hash_decay"].append(proposal_network.get_outputs()[FieldHeadNames.HASH_DECAY])  # type: ignore
+                outputs["hash_decay"] = [
+                    proposal_network.get_outputs()[FieldHeadNames.HASH_DECAY]
+                    for proposal_network in self.proposal_networks
+                ]
                 outputs["hash_decay"].append(field_outputs[FieldHeadNames.HASH_DECAY])
 
             if self.config.predict_normals:
@@ -514,7 +524,7 @@ class NerfactoModel(Model):
                 ],
                 dim=1,
             )
-        
+
         if "specular_tint" in outputs:
             images_dict["specular_tint"] = torch.cat(
                 [

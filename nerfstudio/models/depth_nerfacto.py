@@ -28,7 +28,11 @@ from nerfstudio.cameras.rays import RayBundle
 from nerfstudio.model_components import losses
 from nerfstudio.model_components.losses import DepthLossType, depth_loss, depth_ranking_loss
 from nerfstudio.models.nerfacto import NerfactoModel, NerfactoModelConfig
-from nerfstudio.engine.callbacks import TrainingCallback, TrainingCallbackAttributes, TrainingCallbackLocation
+from nerfstudio.engine.callbacks import (
+    TrainingCallback,
+    TrainingCallbackAttributes,
+    TrainingCallbackLocation,
+)
 from nerfstudio.utils import colormaps
 
 
@@ -115,7 +119,7 @@ class DepthNerfactoModel(NerfactoModel):
                         is_euclidean=self.config.is_euclidean_depth,
                         depth_loss_type=self.config.depth_loss_type,
                     ) / len(outputs["weights_list"])
-                
+
                 if self.use_depth_ranking_loss:
                     expected_depth = self.renderer_expected_depth(
                         weights=outputs["weights_list"][i],
@@ -127,7 +131,7 @@ class DepthNerfactoModel(NerfactoModel):
                     ) / len(outputs["weights_list"])
 
         return metrics_dict
-    
+
     def get_training_callbacks(
         self, training_callback_attributes: TrainingCallbackAttributes
     ) -> List[TrainingCallback]:
@@ -141,13 +145,14 @@ class DepthNerfactoModel(NerfactoModel):
             )
         )
 
-        callbacks.append(
-            TrainingCallback(
-                where_to_run=[TrainingCallbackLocation.BEFORE_TRAIN_ITERATION],
-                update_every_num_iters=1,
-                func=self._set_depth_sigma,
+        if self.config.should_decay_sigma:
+            callbacks.append(
+                TrainingCallback(
+                    where_to_run=[TrainingCallbackLocation.BEFORE_TRAIN_ITERATION],
+                    update_every_num_iters=1,
+                    func=self._set_depth_sigma,
+                )
             )
-        )
 
         return callbacks
 
@@ -199,16 +204,17 @@ class DepthNerfactoModel(NerfactoModel):
                 outputs["depth"][depth_mask],
                 termination_depth[depth_mask]
             ).cpu().item()
-        
+
         return metrics, images
 
     def _set_depth_sigma(self, step: int) -> None:
         """Sets up ranking loss multiplier."""
 
         self.depth_sigma_current = torch.maximum(
-            self.config.sigma_decay_rate * self.depth_sigma_current, self.depth_sigma_base
+            self.config.sigma_decay_rate * self.depth_sigma_current,
+            self.depth_sigma_base,
         )
-    
+
     def _set_ranking_loss_multiplier(self, step: int) -> None:
         """Sets up ranking loss multiplier."""
         self.ranking_loss_multiplier = self.config.depth_loss_mult * np.interp(

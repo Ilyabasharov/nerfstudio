@@ -272,7 +272,7 @@ method_configs["zipnerfacto"] = TrainerConfig(
             "scheduler": None,
         },
         "fields": {
-            "optimizer": RAdamOptimizerConfig(lr=3e-3, eps=1e-15),
+            "optimizer": RAdamOptimizerConfig(lr=1e-2, eps=1e-15),
             "scheduler": ExponentialDecaySchedulerConfig(warmup_steps=500, lr_final=5e-5, max_steps=70000),
         },
     },
@@ -309,7 +309,7 @@ method_configs["refnerfacto"] = TrainerConfig(
             "scheduler": None,
         },
         "fields": {
-            "optimizer": RAdamOptimizerConfig(lr=3e-3, eps=1e-15),
+            "optimizer": RAdamOptimizerConfig(lr=1e-2, eps=1e-15),
             "scheduler": ExponentialDecaySchedulerConfig(warmup_steps=500, lr_final=5e-5, max_steps=70000),
         },
     },
