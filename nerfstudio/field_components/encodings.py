@@ -39,6 +39,7 @@ from nerfstudio.utils.math import (
     sph_harm_coeff,
 )
 from nerfstudio.utils.printing import print_tcnn_speed_warning
+from nerfstudio.cameras.bundle_adjustment import HashBundleAdjustment
 
 try:
     import tinycudann as tcnn
@@ -276,8 +277,11 @@ class HashEncoding(Encoding):
         interpolation: Interpolation override for tcnn hashgrid. Not supported for torch unless linear.
     """
 
+    bundle_adjustment: HashBundleAdjustment
+
     def __init__(
         self,
+        bundle_adjustment: HashBundleAdjustment,
         num_levels: int = 16,
         min_res: int = 16,
         max_res: int = 1024,
@@ -288,6 +292,8 @@ class HashEncoding(Encoding):
         interpolation: Optional[Literal["Nearest", "Linear", "Smoothstep"]] = None,
     ) -> None:
         super().__init__(in_dim=3)
+
+        self.bundle_adjustment = bundle_adjustment
         self.num_levels = num_levels
         self.features_per_level = features_per_level
         self.log2_hashmap_size = log2_hashmap_size
@@ -327,7 +333,7 @@ class HashEncoding(Encoding):
             self.register_buffer("scalings", scalings, False)
             self.register_buffer("hash_offset", offsets, False)
             
-            self.forward = self.tcnn_encoding.forward # type: ignore
+            self.custom_forward = self.tcnn_encoding.forward # type: ignore
         elif implementation == "torch":
             self.hash_table = torch.rand(size=(self.hash_table_size * num_levels, features_per_level)) * 2 - 1
             self.hash_table *= hash_init_scale
@@ -336,7 +342,7 @@ class HashEncoding(Encoding):
             self.register_buffer("scalings", torch.floor(min_res * self.growth_factor**levels).view(-1, 1), False)
             self.register_buffer("hash_offset", levels * self.hash_table_size, False)
 
-            self.forward = self.pytorch_fwd
+            self.custom_forward = self.pytorch_fwd
         if self.tcnn_encoding is None:
             assert (
                 interpolation is None or interpolation == "Linear"
@@ -459,6 +465,18 @@ class HashEncoding(Encoding):
         )
 
         return scale_feat
+
+    def forward(
+        self,
+        in_tensor: Shaped[Tensor, "*bs input_dim"],
+    ) -> Shaped[Tensor, "*bs output_dim"]:
+
+        out = self.custom_forward(in_tensor)
+        adjusted_out = self.bundle_adjustment(
+            out.view(-1, self.num_levels, self.features_per_level),
+        ).view(*out.shape)
+
+        return adjusted_out
 
 
 class TensorCPEncoding(Encoding):

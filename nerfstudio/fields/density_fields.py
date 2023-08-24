@@ -18,6 +18,7 @@ Proposal network field.
 
 from typing import Literal, Optional, Tuple, Callable
 
+import math
 import torch
 from torch import Tensor, nn
 
@@ -32,6 +33,7 @@ from nerfstudio.utils.math import erf_approx
 from nerfstudio.cameras.bundle_adjustment import HashBundleAdjustment
 
 EPS = 1.0e-7
+ZIP_CONSTANT = math.sqrt(8)
 
 
 class HashMLPDensityField(Field):
@@ -67,7 +69,6 @@ class HashMLPDensityField(Field):
     ) -> None:
         super().__init__()
         self.register_buffer("aabb", aabb)
-        self.bundle_adjustment = bundle_adjustment
         self.spatial_distortion = spatial_distortion
         self.use_linear = use_linear
         self.regularize_function = regularize_function
@@ -79,6 +80,7 @@ class HashMLPDensityField(Field):
         self.register_buffer("log2_hashmap_size", torch.tensor(log2_hashmap_size))
 
         self.encoding = HashEncoding(
+            bundle_adjustment=bundle_adjustment,
             num_levels=num_levels,
             min_res=base_res,
             max_res=max_res,
@@ -111,9 +113,6 @@ class HashMLPDensityField(Field):
         selector = ((positions > 0.0) & (positions < 1.0)).all(dim=-1)
         positions = positions * selector[..., None]
         x = self.encoding(positions.view(-1, 3)).to(positions)
-        x = self.bundle_adjustment(
-            x.view(-1, self.num_levels, self.features_per_level),
-        ).view(-1, self.num_levels * self.features_per_level) # type: ignore
         density_before_activation = self.network(x).view(*ray_samples.frustums.shape, -1)
         # Rectifying the density with an exponential is much more stable than a ReLU or
         # softplus, because it enables high post-activation (float32) density outputs
@@ -122,7 +121,11 @@ class HashMLPDensityField(Field):
         density = density * selector[..., None]
         return density, None
 
-    def get_outputs(self, ray_samples: Optional[RaySamples] = None, density_embedding: Optional[Tensor] = None) -> dict:
+    def get_outputs(
+        self,
+        ray_samples: Optional[RaySamples] = None,
+        density_embedding: Optional[Tensor] = None,
+    ) -> dict:
         outputs = {}
         if self.compute_hash_regularization:
             outputs[FieldHeadNames.HASH_DECAY] = self.encoding.regularize_hash_pyramid(self.regularize_function)
@@ -219,14 +222,15 @@ class HashMLPGaussianDensityField(HashMLPDensityField):
 
         # hash grid performs trilerp inside itself
         mean = (
-            self.bundle_adjustment(
-                self.encoding(mean.view(-1, 3))
-                .view(prefix_shape + [self.num_levels * self.features_per_level])  # type: ignore
-                .unflatten(-1, (self.num_levels, self.features_per_level))
-            )
+            self.encoding(mean.view(-1, 3))
+            .view(prefix_shape + [self.num_levels * self.features_per_level])  # type: ignore
+            .unflatten(-1, (self.num_levels, self.features_per_level))
         )  # [..., "dim", "num_levels", "features_per_level"]
         weights = erf_approx(
-            1 / (8**0.5 * cov[..., None] * self.encoding.scalings.view(-1)).abs().clamp_min(EPS)  # type: ignore
+            (ZIP_CONSTANT * cov[..., None] * self.encoding.scalings.view(-1)) # type: ignore
+            .abs()
+            .clamp_min(EPS)
+            .pow(-1)
         )  # [..., "dim", "num_levels"]
 
         features = (

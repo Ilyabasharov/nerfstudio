@@ -17,14 +17,13 @@ Collection of Losses.
 """
 
 from enum import Enum
-from typing import Dict, Literal, Optional, Tuple, cast, List, FrozenSet
+from typing import Literal, Optional, Tuple, List
 
 import torch
 from jaxtyping import Bool, Float
 from torch import Tensor, nn
 
 from nerfstudio.cameras.rays import RaySamples
-from nerfstudio.field_components.field_heads import FieldHeadNames
 from nerfstudio.utils.math import masked_reduction, normalized_depth_scale_and_shift
 
 L1Loss = nn.L1Loss
@@ -602,48 +601,6 @@ def tv_loss(grids: Float[Tensor, "grids feature_dim row column"]) -> Float[Tenso
     h_tv = torch.pow((grids[:, :, 1:, :] - grids[:, :, :-1, :]), 2).sum()
     w_tv = torch.pow((grids[:, :, :, 1:] - grids[:, :, :, :-1]), 2).sum()
     return 2 * (h_tv / h_tv_count + w_tv / w_tv_count) / number_of_grids
-
-
-class _GradientScaler(torch.autograd.Function):  # typing: ignore
-    """
-    Scale gradients by a constant factor.
-    """
-
-    @staticmethod
-    def forward(ctx, value, scaling):
-        ctx.save_for_backward(scaling)
-        return value, scaling
-
-    @staticmethod
-    def backward(ctx, output_grad, grad_scaling):
-        (scaling,) = ctx.saved_tensors
-        return output_grad * scaling, grad_scaling
-
-
-def scale_gradients_by_distance_squared(
-    field_outputs: Dict[FieldHeadNames, torch.Tensor],
-    ray_samples: RaySamples,
-    field_names_exclude: FrozenSet[FieldHeadNames] = frozenset(),
-) -> Dict[FieldHeadNames, torch.Tensor]:
-    """
-    Scale gradients by the ray distance to the pixel
-    as suggested in `Radiance Field Gradient Scaling for Unbiased Near-Camera Training` paper
-
-    Note: The scaling is applied on the interval of [0, 1] along the ray!
-
-    Example:
-        GradientLoss should be called right after obtaining the densities and colors from the field. ::
-            >>> field_outputs = scale_gradient_by_distance_squared(field_outputs, ray_samples)
-    """
-    out = {}
-    ray_dist = (ray_samples.frustums.starts + ray_samples.frustums.ends) / 2
-    scaling = ray_dist.square_().clamp_(0, 1)
-    for key, value in field_outputs.items():
-        if key in field_names_exclude:
-            out[key] = value
-        else:
-            out[key], _ = cast(Tuple[Tensor, Tensor], _GradientScaler.apply(value, scaling))
-    return out
 
 
 def depth_ranking_loss(

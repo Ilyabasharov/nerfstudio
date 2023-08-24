@@ -19,6 +19,7 @@ Field for compound nerf model, adds scene contraction and image embeddings to in
 from typing import Literal, Optional, Tuple, Callable
 from jaxtyping import Float
 
+import math
 import torch
 from torch import Tensor, nn
 
@@ -31,6 +32,7 @@ from nerfstudio.utils.math import erf_approx
 from nerfstudio.cameras.bundle_adjustment import HashBundleAdjustment
 
 EPS = 1.0e-7
+ZIP_CONSTANT = math.sqrt(8)
 
 
 class ZipNerfactoField(NerfactoField):
@@ -194,14 +196,15 @@ class ZipNerfactoField(NerfactoField):
 
         # hash grid performs trilerp inside itself
         mean = (
-            self.bundle_adjustment(
-                self.mlp_base_grid(mean.view(-1, 3))
-                .view(prefix_shape + [self.num_levels * self.features_per_level])  # type: ignore
-                .unflatten(-1, (self.num_levels, self.features_per_level))
-            )
+            self.mlp_base_grid(mean.view(-1, 3))
+            .view(prefix_shape + [self.num_levels * self.features_per_level])  # type: ignore
+            .unflatten(-1, (self.num_levels, self.features_per_level))
         )  # [..., "dim", "num_levels", "features_per_level"]
         weights = erf_approx(
-            1 / (8**0.5 * (cov[..., None] * self.mlp_base_grid.scalings.view(-1)).abs()).clamp_min(EPS)  # type: ignore
+            (ZIP_CONSTANT * cov[..., None] * self.mlp_base_grid.scalings.view(-1)) # type: ignore
+            .abs()
+            .clamp_min(EPS)
+            .pow(-1)
         )  # [..., "dim", "num_levels"]
         features = (
             (mean * weights[..., None]).mean(dim=-3).flatten(-2, -1)

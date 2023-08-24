@@ -40,16 +40,16 @@ from nerfstudio.model_components.losses import (
     interlevel_loss,
     orientation_loss,
     pred_normal_loss,
-    scale_gradients_by_distance_squared,
     hash_decay_loss,
     zipnerf_loss,
 )
+from nerfstudio.model_components.scalers import scale_gradients_by_distance_squared
 from nerfstudio.model_components.ray_samplers import ProposalNetworkSampler, UniformSampler
 from nerfstudio.model_components.renderers import AccumulationRenderer, DepthRenderer, NormalsRenderer, RGBRenderer
 from nerfstudio.model_components.scene_colliders import NearFarCollider
 from nerfstudio.model_components.shaders import NormalsShader
 from nerfstudio.models.base_model import Model, ModelConfig
-from nerfstudio.cameras.bundle_adjustment import HashBundleAdjustment
+from nerfstudio.cameras.bundle_adjustment import BundleAdjustmentType
 from nerfstudio.utils import colormaps
 
 
@@ -135,6 +135,8 @@ class NerfactoModelConfig(ModelConfig):
     """Whether to disable scene contraction or not."""
     use_gradient_scaling: bool = True
     """Use gradient scaler where the gradients are lower for points closer to the camera."""
+    bundle_adjustment_type: BundleAdjustmentType = BundleAdjustmentType.CAMP
+    """Type of bundle_adjustment."""
     bundle_adjust: bool = False
     """Whether to bundle adjust (BARF)"""
     coarse_to_fine_iters: Optional[Tuple[float, float]] = (0.0, 0.8)
@@ -168,7 +170,7 @@ class NerfactoModel(Model):
 
         self.regularize_function = getattr(torch, self.config.regularize_function, torch.square)
 
-        self.bundle_adjustment = HashBundleAdjustment(
+        self.bundle_adjustment = self.config.bundle_adjustment_type.value(
             bundle_adjust=self.config.bundle_adjust,
             coarse_to_fine_iters=self.config.coarse_to_fine_iters,
         )
@@ -408,12 +410,12 @@ class NerfactoModel(Model):
                     weights.detach(), field_outputs[FieldHeadNames.NORMALS], ray_bundle.directions
                 )
 
-            if self.config.supervise_pred_normals_by_density:
-                outputs["rendered_pred_normal_loss"] = pred_normal_loss(
-                    weights.detach(),
-                    field_outputs[FieldHeadNames.NORMALS].detach(),
-                    field_outputs[FieldHeadNames.PRED_NORMALS],
-                )
+                if self.config.supervise_pred_normals_by_density:
+                    outputs["rendered_pred_normal_loss"] = pred_normal_loss(
+                        weights.detach(),
+                        field_outputs[FieldHeadNames.NORMALS].detach(),
+                        field_outputs[FieldHeadNames.PRED_NORMALS],
+                    )
 
         for i in range(self.config.num_proposal_iterations):
             outputs[f"prop_depth_{i}"] = self.renderer_depth(

@@ -76,7 +76,6 @@ class NerfactoField(Field):
     """
 
     aabb: Tensor
-    bundle_adjustment: HashBundleAdjustment
 
     def __init__(
         self,
@@ -114,7 +113,6 @@ class NerfactoField(Field):
 
         self.register_buffer("aabb", aabb)
         self.geo_feat_dim = geo_feat_dim
-        self.bundle_adjustment = bundle_adjustment
 
         self.register_buffer("max_res", torch.tensor(max_res))
         self.register_buffer("num_levels", torch.tensor(num_levels))
@@ -142,10 +140,15 @@ class NerfactoField(Field):
         )
 
         self.position_encoding = NeRFEncoding(
-            in_dim=3, num_frequencies=2, min_freq_exp=0, max_freq_exp=2 - 1, implementation=implementation
+            in_dim=3,
+            num_frequencies=2,
+            min_freq_exp=0,
+            max_freq_exp=2 - 1,
+            implementation=implementation,
         )
 
         self.mlp_base_grid = HashEncoding(
+            bundle_adjustment=bundle_adjustment,
             num_levels=num_levels,
             min_res=base_res,
             max_res=max_res,
@@ -252,9 +255,6 @@ class NerfactoField(Field):
         if not self._sample_locations.requires_grad:
             self._sample_locations.requires_grad = True
         hashgrid_vecs = self.mlp_base_grid(positions.view(-1, 3))
-        hashgrid_vecs = self.bundle_adjustment(
-            hashgrid_vecs.view(-1, self.num_levels, self.features_per_level),
-        ).view(-1, self.num_levels * self.features_per_level) # type: ignore
         h = self.mlp_base_mlp(hashgrid_vecs).view(*ray_samples.frustums.shape, -1)
         density_before_activation, base_mlp_out = torch.split(h, [1, self.geo_feat_dim], dim=-1)
         self._density_before_activation = density_before_activation
