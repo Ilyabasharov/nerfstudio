@@ -29,7 +29,11 @@ from torchmetrics.image import PeakSignalNoiseRatio
 from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 
 from nerfstudio.cameras.rays import RayBundle
-from nerfstudio.engine.callbacks import TrainingCallback, TrainingCallbackAttributes, TrainingCallbackLocation
+from nerfstudio.engine.callbacks import (
+    TrainingCallback,
+    TrainingCallbackAttributes,
+    TrainingCallbackLocation,
+)
 from nerfstudio.field_components.field_heads import FieldHeadNames
 from nerfstudio.field_components.spatial_distortions import SceneContraction
 from nerfstudio.fields.density_fields import HashMLPDensityField
@@ -133,13 +137,13 @@ class NerfactoModelConfig(ModelConfig):
     """Whether to predict normals or not."""
     disable_scene_contraction: bool = False
     """Whether to disable scene contraction or not."""
-    use_gradient_scaling: bool = True
+    use_gradient_scaling: bool = False
     """Use gradient scaler where the gradients are lower for points closer to the camera."""
-    bundle_adjustment_type: BundleAdjustmentType = BundleAdjustmentType.CAMP
+    bundle_adjustment_type: BundleAdjustmentType = BundleAdjustmentType.BARF
     """Type of bundle_adjustment."""
-    bundle_adjust: bool = False
+    use_bundle_adjust: bool = False
     """Whether to bundle adjust (BARF)"""
-    coarse_to_fine_iters: Optional[Tuple[float, float]] = (0.0, 0.8)
+    coarse_to_fine_iters: Optional[Tuple[float, float]] = (0.0, 0.3)
     """Iterations (as a percentage of total iterations) at which coarse to fine hash grid optimization starts and ends.
     Linear interpolation between (start, end) and full activation of hash grid from end onwards."""
     implementation: Literal["tcnn", "torch"] = "tcnn"
@@ -171,7 +175,7 @@ class NerfactoModel(Model):
         self.regularize_function = getattr(torch, self.config.regularize_function, torch.square)
 
         self.bundle_adjustment = self.config.bundle_adjustment_type.value(
-            bundle_adjust=self.config.bundle_adjust,
+            use_bundle_adjust=self.config.use_bundle_adjust,
             coarse_to_fine_iters=self.config.coarse_to_fine_iters,
         )
 
@@ -446,7 +450,7 @@ class NerfactoModel(Model):
             gt_image=image,
         )
 
-        loss_dict["rgb_loss"] = self.rgb_loss(gt_rgb, pred_rgb)
+        loss_dict["rgb_loss"] = self.rgb_loss(pred_rgb, gt_rgb)
         if self.training:
             loss_dict["interlevel_loss"] = self.config.interlevel_loss_mult * self.interlevel_loss(
                 outputs["weights_list"], outputs["ray_samples_list"]

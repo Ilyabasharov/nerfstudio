@@ -33,13 +33,13 @@ class _TruncExp(Function):
     @custom_fwd(cast_inputs=torch.float32)
     def forward(ctx, x):
         ctx.save_for_backward(x)
-        return torch.exp(x)
+        return x.exp()
 
     @staticmethod
     @custom_bwd
     def backward(ctx, g):
         x = ctx.saved_tensors[0]
-        return g * torch.exp(x.clamp(-15, 15))
+        return g * x.clamp(-15, 15).exp()
 
 
 class ShiftedSoftplus(nn.Softplus):

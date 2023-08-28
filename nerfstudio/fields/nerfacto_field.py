@@ -281,7 +281,7 @@ class NerfactoField(Field):
             if not self.use_appearance_embedding:
                 output = self.affine_mlp(embedded_appearance.view(-1, self.appearance_embedding_dim))
                 scale, shift = torch.split(output, [self.shift_scale_out_dim, self.shift_scale_out_dim], dim=-1)  # type: ignore
-                scale = trunc_exp(scale)
+                scale = scale.exp()
         else:
             multiplier = self.embedding_appearance.mean(dim=0) if self.use_average_appearance_embedding else 0.0
             embedded_appearance = torch.ones(

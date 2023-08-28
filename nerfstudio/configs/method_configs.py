@@ -250,14 +250,13 @@ method_configs["zipnerfacto"] = TrainerConfig(
     mixed_precision=True,
     pipeline=VanillaPipelineConfig(
         datamanager=VanillaDataManagerConfig(
-            camera_res_scale_factor=0.5,
             dataparser=NerfstudioDataParserConfig(),
             train_num_rays_per_batch=6096,
             eval_num_rays_per_batch=4096,
             camera_optimizer=CameraOptimizerConfig(
                 mode="SO3xR3",
-                optimizer=RAdamOptimizerConfig(lr=5e-6, eps=1e-8, weight_decay=1e-2),
-                scheduler=ExponentialDecaySchedulerConfig(lr_final=1e-6, max_steps=50000),
+                optimizer=RAdamOptimizerConfig(lr=6e-4, eps=1e-8, weight_decay=1e-3),
+                scheduler=ExponentialDecaySchedulerConfig(lr_final=1e-5, max_steps=50000),
             ),
         ),
         model=ZipNerfactoModelConfig(
@@ -268,7 +267,7 @@ method_configs["zipnerfacto"] = TrainerConfig(
     ),
     optimizers={
         "proposal_networks": {
-            "optimizer": AdamOptimizerConfig(lr=1e-2, eps=1e-15),
+            "optimizer": RAdamOptimizerConfig(lr=1e-2, eps=1e-15),
             "scheduler": None,
         },
         "fields": {
@@ -293,8 +292,8 @@ method_configs["refnerfacto"] = TrainerConfig(
             eval_num_rays_per_batch=4096,
             camera_optimizer=CameraOptimizerConfig(
                 mode="SO3xR3",
-                optimizer=RAdamOptimizerConfig(lr=5e-6, eps=1e-8, weight_decay=1e-2),
-                scheduler=ExponentialDecaySchedulerConfig(lr_final=1e-6, max_steps=70000),
+                optimizer=RAdamOptimizerConfig(lr=6e-4, eps=1e-8, weight_decay=1e-3),
+                scheduler=ExponentialDecaySchedulerConfig(lr_final=1e-5, max_steps=50000),
             ),
         ),
         model=RefNerfactoModelConfig(
@@ -305,7 +304,7 @@ method_configs["refnerfacto"] = TrainerConfig(
     ),
     optimizers={
         "proposal_networks": {
-            "optimizer": AdamOptimizerConfig(lr=1e-2, eps=1e-15),
+            "optimizer": RAdamOptimizerConfig(lr=1e-2, eps=1e-15),
             "scheduler": None,
         },
         "fields": {
@@ -330,8 +329,8 @@ method_configs["ziprefnerfacto"] = TrainerConfig(
             eval_num_rays_per_batch=4096,
             camera_optimizer=CameraOptimizerConfig(
                 mode="SO3xR3",
-                optimizer=RAdamOptimizerConfig(lr=5e-6, eps=1e-8, weight_decay=1e-2),
-                scheduler=ExponentialDecaySchedulerConfig(lr_final=1e-6, max_steps=70000),
+                optimizer=RAdamOptimizerConfig(lr=6e-4, eps=1e-8, weight_decay=1e-3),
+                scheduler=ExponentialDecaySchedulerConfig(lr_final=1e-5, max_steps=50000),
             ),
         ),
         model=ZipRefNerfactoModelConfig(
@@ -342,7 +341,7 @@ method_configs["ziprefnerfacto"] = TrainerConfig(
     ),
     optimizers={
         "proposal_networks": {
-            "optimizer": AdamOptimizerConfig(lr=1e-2, eps=1e-15),
+            "optimizer": RAdamOptimizerConfig(lr=1e-2, eps=1e-15),
             "scheduler": None,
         },
         "fields": {
@@ -363,14 +362,14 @@ method_configs["depth-ziprefnerfacto"] = TrainerConfig(
     pipeline=VanillaPipelineConfig(
         datamanager=VanillaDataManagerConfig(
             _target=VanillaDataManager[DepthDataset],
-            pixel_sampler=PairPixelSamplerConfig(num_rays_per_batch=3500),
+            pixel_sampler=PairPixelSamplerConfig(num_rays_per_batch=4096),
             dataparser=NerfstudioDataParserConfig(),
-            train_num_rays_per_batch=3500,
-            eval_num_rays_per_batch=3500,
+            train_num_rays_per_batch=4096,
+            eval_num_rays_per_batch=4096,
             camera_optimizer=CameraOptimizerConfig(
                 mode="SO3xR3",
-                optimizer=RAdamOptimizerConfig(lr=5e-6, eps=1e-8, weight_decay=1e-2),
-                scheduler=ExponentialDecaySchedulerConfig(lr_final=1e-6, max_steps=70000),
+                optimizer=AdamOptimizerConfig(lr=6e-4, eps=1e-8, weight_decay=1e-3),
+                scheduler=ExponentialDecaySchedulerConfig(lr_final=1e-5, max_steps=60000),
             ),
         ),
         model=DepthZipRefNerfactoModelConfig(
@@ -381,7 +380,7 @@ method_configs["depth-ziprefnerfacto"] = TrainerConfig(
     ),
     optimizers={
         "proposal_networks": {
-            "optimizer": AdamOptimizerConfig(lr=1e-2, eps=1e-15),
+            "optimizer": RAdamOptimizerConfig(lr=1e-2, eps=1e-15),
             "scheduler": None,
         },
         "fields": {

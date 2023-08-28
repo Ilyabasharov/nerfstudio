@@ -104,25 +104,30 @@ class LinearizedSceneContraction(SpatialDistortion):
         def contract(
             mean: Float[Tensor, "*bs 3"],
             cov: Float[Tensor, "*bs"],
-            eps: float = 1e-7,
+            eps: float = 1e-8,
         ) -> Tuple[Float[Tensor, "*bs 3"], Float[Tensor, "*bs"]]:
             """ZipNeRF contraction function"""
-            mag = torch.linalg.norm(mean, ord=self.order, dim=-1, keepdim=False).clamp_min(eps)
-            mask = mag < 1
-            mean_contracted = torch.where(mask[..., None], mean, (2 - (1 / mag[..., None])) * (mean / mag[..., None]))
-            # prevent negative root computations
-            clamped_mag = mag.clamp_min(1.0)
-            det_13 = (torch.pow(2 * clamped_mag - 1, 1 / 3) / clamped_mag) ** 2
-            std_contracted = torch.where(mask, cov, cov * det_13)
+            mag = torch.linalg.norm(mean, ord=self.order, dim=-1, keepdim=True).clamp_min(eps)
 
-            return mean_contracted, std_contracted
+            mask = mag >= 1
+            mean_contracted = torch.where(
+                mask,
+                (2 - (1 / mag)) * (mean / mag),
+                mean,
+            )
+
+            # prevent negative root computations
+            cov_contracted = cov.clone()
+            cov_contracted[mask] *= (torch.pow(2 * mag[mask] - 1, 1 / 3) / mag[mask]) ** 2
+
+            return mean_contracted, cov_contracted
 
         assert isinstance(positions, Gaussians)
 
         pre_shape = positions.mean.shape[:-1]
 
         means = positions.mean.view(-1, 3)
-        cov = positions.cov.view(-1)
+        cov = positions.cov.view(-1, 1)
 
         means, cov = contract(means, cov)
 

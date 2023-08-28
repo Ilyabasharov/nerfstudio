@@ -167,10 +167,11 @@ class PixelSampler:
             else:
                 indices = self.sample_method(num_rays_per_batch, num_images, image_height, image_width, device=device)
 
-        c, y, x = (i.flatten() for i in torch.split(indices, 1, dim=-1))
-        c, y, x = c.cpu(), y.cpu(), x.cpu()
+        c, y, x = (i.flatten().cpu() for i in torch.split(indices, 1, dim=-1))
         collated_batch = {
-            key: value[c, y, x] for key, value in batch.items() if key != "image_idx" and value is not None
+            key: value[c, y, x]
+            for key, value in batch.items()
+            if key != "image_idx" and value is not None
         }
 
         assert collated_batch["image"].shape[0] == num_rays_per_batch, \
@@ -387,8 +388,8 @@ class PairPixelSampler(PixelSampler):  # pylint: disable=too-few-public-methods
     def __init__(self, config: PairPixelSamplerConfig, **kwargs) -> None:
         self.config = config
         self.radius = self.config.radius
-        self.rays_to_sample = self.config.num_rays_per_batch // 2
         super().__init__(self.config, **kwargs)
+        self.rays_to_sample = self.config.num_rays_per_batch // 2
 
     # overrides base method
     def sample_method(  # pylint: disable=no-self-use
@@ -421,10 +422,12 @@ class PairPixelSampler(PixelSampler):  # pylint: disable=too-few-public-methods
 
             pair_indices = torch.hstack(
                 (
-                    torch.zeros(rays_to_sample, 1, device=device, dtype=torch.long),
-                    torch.randint(-self.radius, self.radius, (rays_to_sample, 2), device=device, dtype=torch.long),
+                    torch.zeros(rays_to_sample, 1, dtype=torch.long, device=device),
+                    torch.randint(-self.radius, self.radius, (rays_to_sample, 2), dtype=torch.long, device=device),
                 )
             )
             pair_indices += indices
             indices = torch.hstack((indices, pair_indices)).view(rays_to_sample * 2, 3)
+            if (indices < 0).any():
+                import ipdb; ipdb.set_trace()
         return indices

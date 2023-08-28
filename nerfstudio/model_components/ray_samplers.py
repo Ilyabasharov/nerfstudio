@@ -294,12 +294,10 @@ class PDFSampler(Sampler):
         train_stratified: bool = True,
         single_jitter: bool = False,
         include_original: bool = True,
-        histogram_padding: float = 0.00,
     ) -> None:
         super().__init__(num_samples=num_samples)
         self.train_stratified = train_stratified
         self.include_original = include_original
-        self.histogram_padding = histogram_padding
         self.single_jitter = single_jitter
 
     def generate_ray_samples(
@@ -331,7 +329,7 @@ class PDFSampler(Sampler):
         assert num_samples is not None
         num_bins = num_samples + 1
 
-        weights = weights[..., 0] + self.histogram_padding
+        weights = weights[..., 0]
 
         # Add small offset to rays with zero weight to prevent NaNs
         weights_sum = torch.sum(weights, dim=-1, keepdim=True)
@@ -572,12 +570,14 @@ class ProposalNetworkSampler(Sampler):
         single_jitter: bool = False,
         update_sched: Callable = lambda x: 1,
         initial_sampler: Optional[Sampler] = None,
+        histogram_padding: float = 0.01,
     ) -> None:
         super().__init__()
         self.num_proposal_samples_per_ray = num_proposal_samples_per_ray
         self.num_nerf_samples_per_ray = num_nerf_samples_per_ray
         self.num_proposal_network_iterations = num_proposal_network_iterations
         self.update_sched = update_sched
+        self.histogram_padding = histogram_padding
         if self.num_proposal_network_iterations < 1:
             raise ValueError("num_proposal_network_iterations must be >= 1")
 
@@ -586,7 +586,10 @@ class ProposalNetworkSampler(Sampler):
             self.initial_sampler = UniformLinDispPiecewiseSampler(single_jitter=single_jitter)
         else:
             self.initial_sampler = initial_sampler
-        self.pdf_sampler = PDFSampler(include_original=False, single_jitter=single_jitter)
+        self.pdf_sampler = PDFSampler(
+            include_original=False,
+            single_jitter=single_jitter,
+        )
 
         self._anneal = 1.0
         self._steps_since_update = 0
@@ -626,7 +629,14 @@ class ProposalNetworkSampler(Sampler):
                 # PDF sampling based on the last samples and their weights
                 # Perform annealing to the weights. This will be a no-op if self._anneal is 1.0.
                 assert weights is not None
-                annealed_weights = torch.pow(weights, self._anneal)
+
+                # A slightly more stable way to compute weights**anneal. If the distance
+                # between adjacent intervals is zero then its weight is fixed to 0.
+                annealed_weights = torch.where(
+                    ray_samples.spacing_ends > ray_samples.spacing_starts,
+                    self._anneal * torch.log(weights + self.histogram_padding),
+                    -torch.inf,
+                ).exp_()
                 ray_samples = self.pdf_sampler(ray_bundle, ray_samples, annealed_weights, num_samples=num_samples)
             if is_prop:
                 if updated:

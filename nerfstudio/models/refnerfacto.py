@@ -58,7 +58,7 @@ class RefNerfactoModelConfig(NerfactoModelConfig):
     """Padding added to the RGB outputs."""
     predict_normals: bool = True
     """Whether to predict normals or not."""
-    bundle_adjust: bool = False
+    use_bundle_adjust: bool = False
     """Whether to bundle adjust (BARF)"""
     coarse_to_fine_iters: Optional[Tuple[float, float]] = (0.0, 0.1)
     """Iterations (as a percentage of total iterations) at which coarse to fine hash grid optimization starts and ends.

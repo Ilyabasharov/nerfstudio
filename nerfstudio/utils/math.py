@@ -186,7 +186,7 @@ def conical_frustum_to_gaussian(
     radius_variance = radius**2 * ((mu**2) / 4 + (5 / 12) * hw**2 - 4 / 15 * (hw**4) / (3 * mu**2 + hw**2))
     return compute_3d_gaussian(directions, means, dir_variance, radius_variance)
 
-
+@torch_compile
 def multisampled_frustum_to_gaussian(
     origins: Float[Tensor, "*batch num_samples 3"],
     directions: Float[Tensor, "*batch num_samples 3"],
@@ -195,7 +195,7 @@ def multisampled_frustum_to_gaussian(
     radius: Float[Tensor, "*batch num_samples 1"],
     rand: bool = True,
     cov_scale: float = 0.5,
-    eps: float = 1e-10,
+    eps: float = 1e-8,
 ) -> Gaussians:
     """Approximates frustums with a Gaussian distributions via multisampling.
     Proposed in ZipNeRF https://arxiv.org/pdf/2304.06706.pdf
@@ -285,7 +285,7 @@ def multisampled_frustum_to_gaussian(
 
     return Gaussians(mean=means, cov=stds)
 
-
+@torch_compile(dynamic=True, mode="reduce-overhead", backend="eager")
 def expected_sin(x_means: torch.Tensor, x_vars: torch.Tensor) -> torch.Tensor:
     """Computes the expected value of sin(y) where y ~ N(x_means, x_vars)
 
@@ -298,7 +298,6 @@ def expected_sin(x_means: torch.Tensor, x_vars: torch.Tensor) -> torch.Tensor:
     """
 
     return torch.exp(-0.5 * x_vars) * torch.sin(x_means)
-
 
 @torch_compile(dynamic=True, mode="reduce-overhead", backend="eager")
 def intersect_aabb(
@@ -387,7 +386,9 @@ def masked_reduction(
 
 
 def normalized_depth_scale_and_shift(
-    prediction: Float[Tensor, "1 32 mult"], target: Float[Tensor, "1 32 mult"], mask: Bool[Tensor, "1 32 mult"]
+    prediction: Float[Tensor, "1 32 mult"],
+    target: Float[Tensor, "1 32 mult"],
+    mask: Bool[Tensor, "1 32 mult"],
 ):
     """
     More info here: https://arxiv.org/pdf/2206.00665.pdf supplementary section A2 Depth Consistency Loss
@@ -444,7 +445,6 @@ def power_fn(x: torch.Tensor, lam: float = -1.5, max_bound: float = 1e10) -> tor
     lam_1 = abs(lam - 1)
     return (lam_1 / lam) * ((x / lam_1 + 1) ** lam - 1)
 
-
 @torch_compile(dynamic=True, mode="reduce-overhead", backend="inductor")
 def inv_power_fn(
     x: torch.Tensor,
@@ -472,7 +472,7 @@ def inv_power_fn(
 @torch_compile(dynamic=True, mode="reduce-overhead", backend="eager")
 def erf_approx(x: torch.Tensor) -> torch.Tensor:
     """Error function approximation proposed in ZipNeRF paper (Eq. 11)."""
-    return torch.sign(x) * torch.sqrt(1 - torch.exp(-4 / torch.pi * x**2))
+    return torch.sign(x) * torch.sqrt(1 - torch.exp(-(4 / torch.pi) * x**2))
 
 
 def div_round_up(val: int, divisor: int) -> int:
@@ -551,3 +551,47 @@ def linear_to_srgb(
     srgb0 = 323 / 25 * linear
     srgb1 = (211 * torch.maximum(eps, linear) ** (5 / 12) - 11) / 200
     return torch.where(linear <= 0.0031308, srgb0, srgb1)
+
+
+def blur_stepfun(x: Tensor, y: Tensor, r: float) -> Tuple[Tensor, Tensor]:
+    xr, xr_idx = torch.sort(torch.cat([x - r, x + r], dim=-1))
+    y1 = (
+        torch.cat([y, torch.zeros_like(y[..., :1])], dim=-1) - torch.cat([torch.zeros_like(y[..., :1]), y], dim=-1)
+    ) / (2 * r)
+    y2 = torch.cat([y1, -y1], dim=-1).take_along_dim(xr_idx[..., :-1], dim=-1)
+    yr = torch.cumsum((xr[..., 1:] - xr[..., :-1]) * torch.cumsum(y2, dim=-1), dim=-1).clamp_min(0)
+    yr = torch.cat([torch.zeros_like(yr[..., :1]), yr], dim=-1)
+    return xr, yr
+
+
+@torch_compile
+def sorted_interp_quad(x, xp, fpdf, fcdf):
+    """interp in quadratic"""
+
+    # Identify the location in `xp` that corresponds to each `x`.
+    # The final `True` index in `mask` is the start of the matching interval.
+    mask = x[..., None, :] >= xp[..., :, None]
+
+    @torch_compile
+    def find_interval(x: Tensor, return_idx=False):
+        # Grab the value where `mask` switches from True to False, and vice versa.
+        # This approach takes advantage of the fact that `x` is sorted.
+        x0, x0_idx = torch.max(torch.where(mask, x[..., None], x[..., :1, None]), -2)
+        x1, x1_idx = torch.min(torch.where(~mask, x[..., None], x[..., -1:, None]), -2)
+        if return_idx:
+            return x0, x1, x0_idx, x1_idx
+        return x0, x1
+
+    fcdf0, fcdf1, fcdf0_idx, fcdf1_idx = find_interval(fcdf, return_idx=True)
+    fpdf0 = fpdf.take_along_dim(fcdf0_idx, dim=-1)
+    fpdf1 = fpdf.take_along_dim(fcdf1_idx, dim=-1)
+    xp0, xp1 = find_interval(xp)
+
+    offset = torch.where(
+        (xp1 - xp0) == 0,
+        0.0,
+        (x - xp0) / (xp1 - xp0),
+    ).clamp_max_(1.0)
+
+    ret = fcdf0 + (x - xp0) * (fpdf0 + fpdf1 * offset + fpdf0 * (1 - offset)) / 2
+    return ret

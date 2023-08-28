@@ -32,23 +32,23 @@ class BundleAdjustment(nn.Module):
     """Bundle adjustment for high frequiency features
 
     Args:
-        bundle_adjust: whether to use bundle adjustment
+        use_bundle_adjust: whether to use bundle adjustment
         coarse_to_fine_iters: iterations (percentage of max iters) at which bundle adjustment is active
     """
 
     def __init__(
         self,
-        bundle_adjust: bool,
+        use_bundle_adjust: bool,
         coarse_to_fine_iters: Optional[Tuple[float, float]] = None,
     ) -> None:
         super().__init__()
 
-        self.bundle_adjust = bundle_adjust
+        self.use_bundle_adjust = use_bundle_adjust
         self.coarse_to_fine_iters = coarse_to_fine_iters
         self.step = 0
         self.max_iters: int = GLOBAL_BUFFER.get("max_iter", 10000)
 
-        if not bundle_adjust:
+        if not use_bundle_adjust:
             self.forward = lambda x: x
         else:
              # check that inputs args are correct
@@ -71,7 +71,7 @@ class BundleAdjustment(nn.Module):
     def get_progress(self) -> float:
         """Log unlocked features"""
 
-        if not self.bundle_adjust:
+        if not self.use_bundle_adjust:
             return 1.0
 
         start, end = self.coarse_to_fine_iters # type: ignore
@@ -79,12 +79,7 @@ class BundleAdjustment(nn.Module):
 
 
 class HashBundleAdjustment(BundleAdjustment):
-    """Bundle adjustment for Hash Encoder
-
-    Args:
-        bundle_adjust: whether to use bundle adjustment
-        coarse_to_fine_iters: iterations (percentage of max iters) at which bundle adjustment is active
-    """
+    """Bundle adjustment for Hash Encoder"""
 
     def _get_masks(
         self,
@@ -122,7 +117,7 @@ class HashBundleAdjustment(BundleAdjustment):
 
 class HashGradBundleAdjustment(HashBundleAdjustment):
     """Gradient bundle adjustment for Hash Encoder.
-    Proposed in https://camp-nerf.github.io
+    Proposed in https://arxiv.org/abs/2302.01571
 
     Args:
         bundle_adjust: whether to use bundle adjustment

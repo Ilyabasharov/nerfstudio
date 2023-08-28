@@ -24,7 +24,12 @@ from jaxtyping import Bool, Float
 from torch import Tensor, nn
 
 from nerfstudio.cameras.rays import RaySamples
-from nerfstudio.utils.math import masked_reduction, normalized_depth_scale_and_shift
+from nerfstudio.utils.math import (
+    masked_reduction,
+    normalized_depth_scale_and_shift,
+    sorted_interp_quad,
+    blur_stepfun,
+)
 
 L1Loss = nn.L1Loss
 MSELoss = nn.MSELoss
@@ -120,43 +125,6 @@ def interlevel_loss(weights_list, ray_samples_list) -> torch.Tensor:
     return loss_interlevel
 
 
-def blur_stepfun(x: Tensor, y: Tensor, r: float) -> Tuple[Tensor, Tensor]:
-    xr, xr_idx = torch.sort(torch.cat([x - r, x + r], dim=-1))
-    y1 = (
-        torch.cat([y, torch.zeros_like(y[..., :1])], dim=-1) - torch.cat([torch.zeros_like(y[..., :1]), y], dim=-1)
-    ) / (2 * r)
-    y2 = torch.cat([y1, -y1], dim=-1).take_along_dim(xr_idx[..., :-1], dim=-1)
-    yr = torch.cumsum((xr[..., 1:] - xr[..., :-1]) * torch.cumsum(y2, dim=-1), dim=-1).clamp_min(0)
-    yr = torch.cat([torch.zeros_like(yr[..., :1]), yr], dim=-1)
-    return xr, yr
-
-
-def sorted_interp_quad(x, xp, fpdf, fcdf):
-    """interp in quadratic"""
-
-    # Identify the location in `xp` that corresponds to each `x`.
-    # The final `True` index in `mask` is the start of the matching interval.
-    mask = x[..., None, :] >= xp[..., :, None]
-
-    def find_interval(x: Tensor, return_idx=False):
-        # Grab the value where `mask` switches from True to False, and vice versa.
-        # This approach takes advantage of the fact that `x` is sorted.
-        x0, x0_idx = torch.max(torch.where(mask, x[..., None], x[..., :1, None]), -2)
-        x1, x1_idx = torch.min(torch.where(~mask, x[..., None], x[..., -1:, None]), -2)
-        if return_idx:
-            return x0, x1, x0_idx, x1_idx
-        return x0, x1
-
-    fcdf0, fcdf1, fcdf0_idx, fcdf1_idx = find_interval(fcdf, return_idx=True)
-    fpdf0 = fpdf.take_along_dim(fcdf0_idx, dim=-1)
-    fpdf1 = fpdf.take_along_dim(fcdf1_idx, dim=-1)
-    xp0, xp1 = find_interval(xp)
-
-    offset = torch.clip(torch.nan_to_num((x - xp0) / (xp1 - xp0), 0), 0, 1)
-    ret = fcdf0 + (x - xp0) * (fpdf0 + fpdf1 * offset + fpdf0 * (1 - offset)) / 2
-    return ret
-
-
 def zipnerf_loss(
     weights_list: List[Tensor],
     ray_samples_list: List[RaySamples],
@@ -187,6 +155,8 @@ def zipnerf_loss(
         # difference between adjacent interpolated values
         w_s = torch.diff(cdf_interp, dim=-1)
         loss += ((w_s.detach() - wp).clamp_min(0) ** 2 / (wp + 1e-5)).mean()
+
+    assert isinstance(loss, Tensor)
     return loss
 
 
@@ -610,13 +580,18 @@ def depth_ranking_loss(
 ) -> Tensor:
     """
     Depth ranking loss as described in the SparseNeRF paper
-    Assumes that the layout of the batch comes from a PairPixelSampler, so that adjacent samples in the gt_depth
-    and rendered_depth are from pixels with a radius of each other
+    Assumes that the layout of the batch comes from a PairPixelSampler,
+    so that adjacent samples in the gt_depth and rendered_depth are from
+    pixels with a radius of each other
     """
     dpt_diff = gt_depth[::2, :] - gt_depth[1::2, :]
     out_diff = rendered_depth[::2, :] - rendered_depth[1::2, :] + m
     differing_signs = torch.sign(dpt_diff) != torch.sign(out_diff)
-    return torch.nanmean((out_diff[differing_signs] * torch.sign(out_diff[differing_signs])))
+    
+    if differing_signs.any():
+        return torch.mean((out_diff[differing_signs] * torch.sign(out_diff[differing_signs])))
+    
+    return rendered_depth.new_zeros(())
 
 
 class CharbonnierLoss(nn.Module):

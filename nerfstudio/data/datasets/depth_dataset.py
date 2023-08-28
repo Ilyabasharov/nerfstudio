@@ -46,7 +46,6 @@ class DepthDataset(InputDataset):
     def __init__(self, dataparser_outputs: DataparserOutputs, scale_factor: float = 1.0):
         super().__init__(dataparser_outputs, scale_factor)
         # if there are no depth images than we want to generate them all with zoe depth
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         if len(dataparser_outputs.image_filenames) > 0 and (
             "depth_filenames" not in dataparser_outputs.metadata.keys()
             or dataparser_outputs.metadata["depth_filenames"] is None
@@ -63,6 +62,7 @@ class DepthDataset(InputDataset):
                 self.depths = torch.load(cache)
             else:
                 self.depths = {}
+                device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
                 transforms = self._find_transform(dataparser_outputs.image_filenames[0])
                 data = dataparser_outputs.image_filenames[0].parent
                 if transforms is not None:

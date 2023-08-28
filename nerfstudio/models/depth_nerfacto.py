@@ -75,8 +75,8 @@ class DepthNerfactoModel(NerfactoModel):
         super().populate_modules()
 
         self.register_buffer(
-            "depth_sigma_current",
-            torch.tensor(
+            name="depth_sigma_current",
+            tensor=torch.tensor(
                 self.config.starting_depth_sigma
                 if self.config.should_decay_sigma
                 else self.config.depth_sigma
@@ -84,8 +84,8 @@ class DepthNerfactoModel(NerfactoModel):
         )
 
         self.register_buffer(
-            "depth_sigma_base",
-            torch.tensor(self.config.depth_sigma),
+            name="depth_sigma_base",
+            tensor=torch.tensor(self.config.depth_sigma),
         )
 
         self.use_depth_ranking_loss = self.config.use_depth_ranking_loss or losses.FORCE_PSEUDODEPTH_LOSS

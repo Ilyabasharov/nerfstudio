@@ -18,15 +18,17 @@ ZipNerfacto implementation.
 
 from __future__ import annotations
 
-import torch
 from dataclasses import dataclass, field
 from typing import Dict, List, Literal, Tuple, Type
+
+import torch
 
 from nerfstudio.models.nerfacto import NerfactoModel, NerfactoModelConfig
 from nerfstudio.field_components.spatial_distortions import LinearizedSceneContraction
 from nerfstudio.model_components.losses import (
     zipnerf_loss,
     CharbonnierLoss,
+    interlevel_loss,
 )
 from nerfstudio.fields.zipnerfacto_field import ZipNerfactoField
 from nerfstudio.model_components.ray_samplers import PowerSampler
@@ -45,7 +47,7 @@ class ZipNerfactoModelConfig(NerfactoModelConfig):
     """Use the same proposal network. Otherwise use different ones."""
     proposal_net_args_list: List[Dict] = field(
         default_factory=lambda: [
-            {"hidden_dim": 16, "log2_hashmap_size": 21, "num_levels": 5, "max_res": 256, "use_linear": False, "features_per_level": 2},
+            {"hidden_dim": 16, "log2_hashmap_size": 21, "num_levels": 5, "max_res": 256, "use_linear": False, "features_per_level": 4},
             {"hidden_dim": 16, "log2_hashmap_size": 21, "num_levels": 5, "max_res": 4096, "use_linear": False, "features_per_level": 4},
         ]
     )
@@ -150,7 +152,9 @@ class ZipNerfactoModel(NerfactoModel):
             self.density_fns.extend([network.density_fn for network in self.proposal_networks])
 
         # Samplers
-        self.proposal_sampler.initial_sampler = PowerSampler(single_jitter=self.config.use_single_jitter)
+        self.proposal_sampler.initial_sampler = PowerSampler(
+            single_jitter=self.config.use_single_jitter,
+        )
 
         # Losses
         self.rgb_loss = CharbonnierLoss()

@@ -105,7 +105,8 @@ class Model(nn.Module):
         if self.config.enable_collider:
             assert self.config.collider_params is not None
             self.collider = NearFarCollider(
-                near_plane=self.config.collider_params["near_plane"], far_plane=self.config.collider_params["far_plane"]
+                near_plane=self.config.collider_params["near_plane"],
+                far_plane=self.config.collider_params["far_plane"],
             )
 
     @abstractmethod

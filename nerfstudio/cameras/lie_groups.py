@@ -21,7 +21,10 @@ from torch import Tensor
 
 
 # We make an exception on snake case conventions because SO3 != so3.
-def exp_map_SO3xR3(tangent_vector: Float[Tensor, "b 6"]) -> Float[Tensor, "b 3 4"]:
+def exp_map_SO3xR3(
+    tangent_vector: Float[Tensor, "b 6"],
+    eps: float = 1e-4,
+) -> Float[Tensor, "b 3 4"]:
     """Compute the exponential map of the direct product group `SO(3) x R^3`.
 
     This can be used for learning pose deltas on SE(3), and is generally faster than `exp_map_SE3`.
@@ -34,11 +37,11 @@ def exp_map_SO3xR3(tangent_vector: Float[Tensor, "b 6"]) -> Float[Tensor, "b 3 4
     # code for SO3 map grabbed from pytorch3d and stripped down to bare-bones
     log_rot = tangent_vector[:, 3:]
     nrms = (log_rot * log_rot).sum(1)
-    rot_angles = torch.clamp(nrms, 1e-4).sqrt()
+    rot_angles = nrms.clamp_min(eps).sqrt()
     rot_angles_inv = 1.0 / rot_angles
     fac1 = rot_angles_inv * rot_angles.sin()
     fac2 = rot_angles_inv * rot_angles_inv * (1.0 - rot_angles.cos())
-    skews = torch.zeros((log_rot.shape[0], 3, 3), dtype=log_rot.dtype, device=log_rot.device)
+    skews = log_rot.new_zeros((log_rot.shape[0], 3, 3))
     skews[:, 0, 1] = -log_rot[:, 2]
     skews[:, 0, 2] = log_rot[:, 1]
     skews[:, 1, 0] = log_rot[:, 2]
@@ -47,7 +50,7 @@ def exp_map_SO3xR3(tangent_vector: Float[Tensor, "b 6"]) -> Float[Tensor, "b 3 4
     skews[:, 2, 1] = log_rot[:, 0]
     skews_square = torch.bmm(skews, skews)
 
-    ret = torch.zeros(tangent_vector.shape[0], 3, 4, dtype=tangent_vector.dtype, device=tangent_vector.device)
+    ret = tangent_vector.new_zeros((tangent_vector.shape[0], 3, 4))
     ret[:, :3, :3] = (
         fac1[:, None, None] * skews
         + fac2[:, None, None] * skews_square

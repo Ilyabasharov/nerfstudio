@@ -3,14 +3,20 @@
 ARG CUDA_VERSION=11.8.0
 ## Base Ubuntu version.
 ARG OS_VERSION=22.04
+
+# Define base image.
+FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu${OS_VERSION} AS base
+
 ## CUDA architectures, required by Colmap and tiny-cuda-nn.
 ## NOTE: All commonly used GPU architectures are included and supported here.
 ## To speedup the image build process remove all architectures but the one of your explicit GPU.
 ## Find details here: https://developer.nvidia.com/cuda-gpus (8.6 translates to 86 in the line below) or in the docs.
 ARG CUDA_ARCHITECTURES=90;89;86;80;75;70;61;52;37
 
-# Define base image.
-FROM nvidia/cuda:${CUDA_VERSION}-devel-ubuntu${OS_VERSION} AS base
+# Dublicate args because of the visibility zone
+# https://docs.docker.com/engine/reference/builder/#understand-how-arg-and-from-interact
+ARG CUDA_VERSION
+ARG OS_VERSION
 
 # metainformation
 LABEL org.opencontainers.image.version="0.1.18" \
@@ -141,7 +147,7 @@ RUN CUDA_VER=${CUDA_VERSION%.*} && CUDA_VER=${CUDA_VER//./} && python3.10 -m pip
         --extra-index-url https://download.pytorch.org/whl/cu${CUDA_VER}
 
 ## Install tynyCUDNN (we need to set the target architectures as environment variable first).
-RUN python3.10 -m pip install git+https://github.com/NVlabs/tiny-cuda-nn.git@v1.6#subdirectory=bindings/torch
+RUN python3.10 -m pip install git+https://github.com/NVlabs/tiny-cuda-nn.git#subdirectory=bindings/torch
 
 ## Install pycolmap, required by hloc.
 RUN git clone --branch v0.4.0 --recursive https://github.com/colmap/pycolmap.git && \
