@@ -56,6 +56,9 @@ class BundleAdjustment(nn.Module):
                 0 <= coarse_to_fine_iters[0] <= 1 and 0 <= coarse_to_fine_iters[1] <= 1
             ), f"start and end iterations for bundle adjustment have to be not None and positive, got {coarse_to_fine_iters}"
 
+            assert (coarse_to_fine_iters[0] < coarse_to_fine_iters[1]
+            ), f"start should be less than end iterations for bundle adjustment, got {coarse_to_fine_iters}"
+
             self.forward = self.mask_freqs
 
     def step_cb(self, step: int) -> None:

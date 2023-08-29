@@ -43,6 +43,8 @@ class DepthNerfactoModelConfig(NerfactoModelConfig):
     _target: Type = field(default_factory=lambda: DepthNerfactoModel)
     depth_loss_mult: float = 1e-1
     """Lambda of the depth loss."""
+    depth_ranking_loss_mult: float = 1.0
+    """Lambda of the depth loss."""
     is_euclidean_depth: bool = False
     """Whether input depth maps are Euclidean distances (or z-distances)."""
     depth_sigma: float = 0.01
@@ -217,6 +219,6 @@ class DepthNerfactoModel(NerfactoModel):
 
     def _set_ranking_loss_multiplier(self, step: int) -> None:
         """Sets up ranking loss multiplier."""
-        self.ranking_loss_multiplier = self.config.depth_loss_mult * np.interp(
+        self.ranking_loss_multiplier = self.config.depth_ranking_loss_mult * np.interp(
             step, [0, 2000], [0, 0.2]
         )

@@ -369,7 +369,7 @@ class PatchPixelSampler(PixelSampler):
 
 @dataclass
 class PairPixelSamplerConfig(PixelSamplerConfig):
-    """Config dataclass for PatchPixelSampler."""
+    """Config dataclass for PairPixelSampler."""
 
     _target: Type = field(default_factory=lambda: PairPixelSampler)
     """Target class to instantiate."""
@@ -428,6 +428,5 @@ class PairPixelSampler(PixelSampler):  # pylint: disable=too-few-public-methods
             )
             pair_indices += indices
             indices = torch.hstack((indices, pair_indices)).view(rays_to_sample * 2, 3)
-            if (indices < 0).any():
-                import ipdb; ipdb.set_trace()
+            
         return indices
