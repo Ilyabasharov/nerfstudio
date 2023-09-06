@@ -78,8 +78,8 @@ pipeline: !!python/object:nerfstudio.pipelines.base_pipeline.VanillaPipelineConf
   _target: !!python/name:nerfstudio.pipelines.base_pipeline.VanillaPipeline ''
   datamanager: !!python/object:nerfstudio.data.datamanagers.base_datamanager.VanillaDataManagerConfig
     _target: !!python/name:nerfstudio.data.datamanagers.base_datamanager.VanillaDataManager ''
-    camera_optimizer: !!python/object:nerfstudio.cameras.camera_optimizers.CameraOptimizerConfig
-      _target: !!python/name:nerfstudio.cameras.camera_optimizers.CameraOptimizer ''
+    pose_optimizer: !!python/object:nerfstudio.cameras.camera_optimizers.PoseOptimizerConfig
+      _target: !!python/name:nerfstudio.cameras.camera_optimizers.PoseOptimizer ''
       mode: 'off'
       optimizer: !!python/object:nerfstudio.engine.optimizers.AdamOptimizerConfig
         _target: *id001

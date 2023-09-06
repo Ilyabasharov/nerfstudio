@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import functools
 from dataclasses import dataclass, field
-from typing import Literal, Optional, Type, Union
+from typing import Literal, Optional, Type, Union, Tuple, Callable
 
 import torch
 import tyro
@@ -39,39 +39,34 @@ from nerfstudio.utils import poses as pose_utils
 
 
 @dataclass
-class CameraOptimizerConfig(InstantiateConfig):
+class PoseOptimizerConfig(InstantiateConfig):
     """Configuration of optimization for camera poses."""
 
-    _target: Type = field(default_factory=lambda: CameraOptimizer)
+    _target: Type = field(default_factory=lambda: PoseOptimizer)
 
     mode: Literal["off", "SO3xR3", "SE3"] = "off"
     """Pose optimization strategy to use. If enabled, we recommend SO3xR3."""
-
     position_noise_std: float = 0.0
     """Noise to add to initial positions. Useful for debugging."""
-
     orientation_noise_std: float = 0.0
     """Noise to add to initial orientations. Useful for debugging."""
-
     optimizer: OptimizerConfig = field(default_factory=lambda: AdamOptimizerConfig(lr=6e-4, eps=1e-15))
-    """ADAM parameters for camera optimization."""
-
+    """Optimizer for poses."""
     scheduler: SchedulerConfig = field(default_factory=lambda: ExponentialDecaySchedulerConfig(max_steps=10000))
-    """Learning rate scheduler for camera optimizer.."""
+    """Learning rate scheduler for pose optimizer.."""
+    param_group: tyro.conf.Suppress[str] = "pose_opt"
+    """Name of the parameter group used for pose optimization.
+    Can be any string that doesn't conflict with other groups."""
 
-    param_group: tyro.conf.Suppress[str] = "camera_opt"
-    """Name of the parameter group used for pose optimization. Can be any string that doesn't conflict with other
-    groups."""
 
-
-class CameraOptimizer(nn.Module):
+class PoseOptimizer(nn.Module):
     """Layer that modifies camera poses to be optimized as well as the field during training."""
 
-    config: CameraOptimizerConfig
+    config: PoseOptimizerConfig
 
     def __init__(
         self,
-        config: CameraOptimizerConfig,
+        config: PoseOptimizerConfig,
         num_cameras: int,
         device: Union[torch.device, str],
         non_trainable_camera_indices: Optional[Int[Tensor, "num_non_trainable_cameras"]] = None,
@@ -135,3 +130,104 @@ class CameraOptimizer(nn.Module):
             # Note that using repeat() instead of tile() here would result in unnecessary copies.
             return torch.eye(4, device=self.device)[None, :3, :4].tile(indices.shape[0], 1, 1)
         return functools.reduce(pose_utils.multiply, outputs)
+
+
+@dataclass
+class IntrinsicOptimizerConfig(InstantiateConfig):
+    """Configuration of optimization for camera intrinsics."""
+
+    _target: Type = field(default_factory=lambda: IntrinsicOptimizer)
+
+    mode: Literal["off", "shift", "scale+shift", "square_scale", "square_scale+shift"] = "off"
+    """Pose optimization strategy to use. If enabled, we recommend SO3xR3."""
+    optimizer: OptimizerConfig = field(default_factory=lambda: AdamOptimizerConfig(lr=6e-4, eps=1e-15))
+    """Optimizer parameters for intrinsic optimization."""
+    scheduler: SchedulerConfig = field(default_factory=lambda: ExponentialDecaySchedulerConfig(max_steps=10000))
+    """Learning rate scheduler for camera optimizer."""
+    param_group: tyro.conf.Suppress[str] = "intrinsic_opt"
+    """Name of the parameter group used for pose optimization.
+    Can be any string that doesn't conflict with other groups."""
+
+
+class IntrinsicOptimizer(nn.Module):
+    """Layer that modifies camera intrinsics to be optimized as well as the field during training."""
+
+    config: IntrinsicOptimizerConfig
+
+    def __init__(
+        self,
+        config: IntrinsicOptimizerConfig,
+        device: Union[torch.device, str],
+        non_trainable_camera_indices: Optional[Int[Tensor, "num_non_trainable_cameras"]] = None,
+        num_cameras: int = 1,
+        **kwargs,
+    ) -> None:
+        super().__init__()
+        assert num_cameras == 1, "More than 1 intrinsic optimizer are not supported yet."
+        self.config = config
+        self.num_cameras = num_cameras
+        self.device = device
+        self.non_trainable_camera_indices = non_trainable_camera_indices
+
+        # Initialize learnable parameters.
+        if self.config.mode == "off":
+            pass
+        elif self.config.mode in ("shift", "scale+shift", "square_scale", "square_scale+shift"):
+            for param in ("scale", "shift"):
+                num_scale_param = 4 if param in self.config.mode else 0
+                init_func: Callable = torch.ones if param == "scale" else torch.zeros
+
+                self.register_parameter(
+                    name=f"intrinsic_adjustment_{param}",
+                    param=torch.nn.Parameter(
+                        init_func(num_scale_param, device=device),
+                        requires_grad=True,
+                    )
+                )
+            
+            self.scale_tf = lambda x: x ** 2 \
+                if "square" in self.config.mode \
+                else lambda x: x
+        else:
+            assert_never(self.config.mode)
+
+    def forward(
+        self,
+        fx: Float[Tensor, "1"],
+        fy: Float[Tensor, "1"],
+        cx: Float[Tensor, "1"],
+        cy: Float[Tensor, "1"],
+    ) -> Tuple[
+            Float[Tensor, "1"],
+            Float[Tensor, "1"],
+            Float[Tensor, "1"],
+            Float[Tensor, "1"],
+        ]:
+        """Intrinsics correction
+        Args:
+            fx: focals at x coordinate to optimize.
+            fy: focals at y coordinate to optimize
+            cx: principal point at x coordinate to optimize.
+            cy: principal point at y coordinate to optimize
+        Returns:
+            Corrected fx, fy, cx, cy
+        """
+
+        # Apply learned transformation delta.
+        if self.config.mode == "off":
+            pass
+        elif "shift" in self.config.mode or "scale" in self.config.mode:
+            if "shift" in self.config.mode:
+                fx += self.intrinsic_adjustment_shift[0]
+                fy += self.intrinsic_adjustment_shift[1]
+                cx += self.intrinsic_adjustment_shift[2]
+                cy += self.intrinsic_adjustment_shift[3]
+            if "scale" in self.config.mode:
+                fx *= self.scale_tf(self.intrinsic_adjustment_scale[0])
+                fy *= self.scale_tf(self.intrinsic_adjustment_scale[1])
+                cx *= self.scale_tf(self.intrinsic_adjustment_scale[2])
+                cy *= self.scale_tf(self.intrinsic_adjustment_scale[3])
+        else:
+            assert_never(self.config.mode)
+
+        return fx, fy, cx, cy

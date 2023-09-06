@@ -139,7 +139,7 @@ class NerfactoModelConfig(ModelConfig):
     """Whether to disable scene contraction or not."""
     use_gradient_scaling: bool = False
     """Use gradient scaler where the gradients are lower for points closer to the camera."""
-    bundle_adjustment_type: BundleAdjustmentType = BundleAdjustmentType.BARF
+    bundle_adjustment_type: BundleAdjustmentType = BundleAdjustmentType.CAMP
     """Type of bundle_adjustment."""
     use_bundle_adjust: bool = False
     """Whether to bundle adjust (BARF)"""

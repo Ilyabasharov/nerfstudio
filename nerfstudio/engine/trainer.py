@@ -215,13 +215,15 @@ class Trainer:
         """
         optimizer_config = self.config.optimizers.copy()
         param_groups = self.pipeline.get_param_groups()
-        camera_optimizer_config = self.config.pipeline.datamanager.camera_optimizer
-        if camera_optimizer_config is not None and camera_optimizer_config.mode != "off":
-            assert camera_optimizer_config.param_group not in optimizer_config
-            optimizer_config[camera_optimizer_config.param_group] = {
-                "optimizer": camera_optimizer_config.optimizer,
-                "scheduler": camera_optimizer_config.scheduler,
-            }
+        
+        for optimizer_group_name in ("pose", "intrinsic"):
+            optimizer_group_config = getattr(self.config.pipeline.datamanager, f"{optimizer_group_name}_optimizer")
+            if optimizer_group_config is not None and optimizer_group_config.mode != "off":
+                assert optimizer_group_config.param_group not in optimizer_config
+                optimizer_config[optimizer_group_config.param_group] = {
+                    "optimizer": optimizer_group_config.optimizer,
+                    "scheduler": optimizer_group_config.scheduler,
+                }
         return Optimizers(optimizer_config, param_groups)
 
     def train(self) -> None:

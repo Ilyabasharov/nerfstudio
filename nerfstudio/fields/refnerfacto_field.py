@@ -315,10 +315,11 @@ class RefNerfactoField(NerfactoField):
             # Rectifying the density with an exponential is much more stable than a ReLU or
             # softplus, because it enables high post-activation (float32) density outputs
             # from smaller internal (float16) parameters.
-            pred_roughness = trunc_exp(
+            pred_roughness = torch.nn.functional.softplus(
                 self.mlp_pred_raw_roughness(
                     inputs_mlps,
                 ).view(*outputs_shape, -1)
+                + self.roughness_bias
             ).to(directions_flat)
             outputs[FieldHeadNames.ROUGHNESS] = pred_roughness
 
@@ -384,6 +385,10 @@ class RefNerfactoField(NerfactoField):
             self.rgb_bias
         )
 
+        if rgb.isnan().any():
+            import ipdb; ipdb.set_trace()
+            c = self.mlp_head(inputs_mlp_head)
+            
         if self.use_pred_diffuse_color:
             # Initialize linear diffuse color around 0.25, so that the combined
             # linear color is initialized around 0.5.

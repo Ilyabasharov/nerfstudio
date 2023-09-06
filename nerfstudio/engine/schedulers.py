@@ -15,9 +15,10 @@
 
 """Scheduler Classes"""
 
+from functools import wraps
 from abc import abstractmethod
 from dataclasses import dataclass, field
-from typing import Literal, Optional, Tuple, Type
+from typing import Literal, Optional, Tuple, Type, Callable
 
 import numpy as np
 from torch.optim import Optimizer, lr_scheduler
@@ -29,6 +30,28 @@ except ImportError:
     from torch.optim.lr_scheduler import _LRScheduler as LRScheduler
 
 from nerfstudio.configs.base_config import InstantiateConfig
+
+
+def delay(cls, lr_init: float) -> Callable:
+    """wrapper for making scheduler enabled with delay"""
+    def decorator(func: Callable) -> Callable:
+        @wraps(func)
+        def wrapper(*args, **kwargs) -> float:
+            step = args[0]
+            learning_factor = 0.0
+            if cls.config.delay_steps != 0:
+                if step <= cls.config.delay_steps:
+                    learning_factor = cls.config.lr_pre_warmup / lr_init
+                elif cls.config.delay_steps > 0:
+                    compenastion = cls.config.delay_steps * (
+                        1 - ((step - cls.config.delay_steps) / cls.config.max_steps)
+                    )
+                    learning_factor = func(step - compenastion, *args, **kwargs)
+            else:
+                learning_factor = func(step, *args, **kwargs)
+            return learning_factor
+        return wrapper
+    return decorator
 
 
 @dataclass
@@ -104,6 +127,8 @@ class ExponentialDecaySchedulerConfig(SchedulerConfig):
     """The maximum number of steps."""
     ramp: Literal["linear", "cosine"] = "cosine"
     """The ramp function to use during the warmup."""
+    delay_steps: int = 0
+    """Number of delay steps."""
 
 
 class ExponentialDecayScheduler(Scheduler):
@@ -115,11 +140,11 @@ class ExponentialDecayScheduler(Scheduler):
 
     def get_scheduler(self, optimizer: Optimizer, lr_init: float) -> LRScheduler:
         if self.config.lr_final is None:
-            lr_final = lr_init
-        else:
-            lr_final = self.config.lr_final
+            self.config.lr_final = lr_init
 
-        def func(step):
+        @delay(self, lr_init)
+        def func(step, *args, **kwargs) -> float:
+            lr = 0
             if step > self.config.max_steps:
                 lr = self.config.lr_final
             elif step < self.config.warmup_steps:
@@ -136,7 +161,8 @@ class ExponentialDecayScheduler(Scheduler):
                 t = np.clip(
                     (step - self.config.warmup_steps) / (self.config.max_steps - self.config.warmup_steps), 0, 1
                 )
-                lr = np.exp(np.log(lr_init) * (1 - t) + np.log(lr_final) * t)
+                assert self.config.lr_final is not None
+                lr = np.exp(np.log(lr_init) * (1 - t) + np.log(self.config.lr_final) * t)
             return lr / lr_init  # divided by lr_init because the multiplier is with the initial learning rate
 
         scheduler = lr_scheduler.LambdaLR(optimizer, lr_lambda=func)
@@ -149,12 +175,16 @@ class CosineDecaySchedulerConfig(SchedulerConfig):
 
     _target: Type = field(default_factory=lambda: CosineDecayScheduler)
     """target class to instantiate"""
-    warm_up_end: int = 5000
-    """Iteration number where warmp ends"""
+    lr_pre_warmup: float = 1e-8
+    """Learning rate before warmup."""
+    warmup_steps: int = 0
+    """Number of warmup steps."""
     learning_rate_alpha: float = 0.05
     """Learning rate alpha value"""
     max_steps: int = 300000
     """The maximum number of steps."""
+    delay_steps: int = 0
+    """Number of delay steps."""
 
 
 class CosineDecayScheduler(Scheduler):
@@ -163,12 +193,17 @@ class CosineDecayScheduler(Scheduler):
     config: CosineDecaySchedulerConfig
 
     def get_scheduler(self, optimizer: Optimizer, lr_init: float) -> LRScheduler:
-        def func(step):
-            if step < self.config.warm_up_end:
-                learning_factor = step / self.config.warm_up_end
+
+        @delay(self, lr_init)
+        def func(step: int):
+            if step < self.config.warmup_steps:
+                learning_factor = (
+                    self.config.lr_pre_warmup
+                    + (lr_init - self.config.lr_pre_warmup) * step / self.config.warmup_steps
+                ) / lr_init
             else:
                 alpha = self.config.learning_rate_alpha
-                progress = (step - self.config.warm_up_end) / (self.config.max_steps - self.config.warm_up_end)
+                progress = (step - self.config.warmup_steps) / (self.config.max_steps - self.config.warmup_steps)
                 learning_factor = (np.cos(np.pi * progress) + 1.0) * 0.5 * (1 - alpha) + alpha
             return learning_factor
 

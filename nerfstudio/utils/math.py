@@ -186,7 +186,7 @@ def conical_frustum_to_gaussian(
     radius_variance = radius**2 * ((mu**2) / 4 + (5 / 12) * hw**2 - 4 / 15 * (hw**4) / (3 * mu**2 + hw**2))
     return compute_3d_gaussian(directions, means, dir_variance, radius_variance)
 
-@torch_compile
+
 def multisampled_frustum_to_gaussian(
     origins: Float[Tensor, "*batch num_samples 3"],
     directions: Float[Tensor, "*batch num_samples 3"],

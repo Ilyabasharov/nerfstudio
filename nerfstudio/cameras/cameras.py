@@ -319,6 +319,7 @@ class Cameras(TensorDataclass):
         camera_indices: Union[Int[Tensor, "*num_rays num_cameras_batch_dims"], int],
         coords: Optional[Float[Tensor, "*num_rays 2"]] = None,
         camera_opt_to_camera: Optional[Float[Tensor, "*num_rays 3 4"]] = None,
+        intrinsics_opt_to_camera: Optional[torch.nn.Module] = None,
         distortion_params_delta: Optional[Float[Tensor, "*num_rays 6"]] = None,
         keep_shape: Optional[bool] = None,
         disable_distortion: bool = False,
@@ -458,7 +459,12 @@ class Cameras(TensorDataclass):
         # raybundle.shape == (num_rays) when done
 
         raybundle = cameras._generate_rays_from_coords(
-            camera_indices, coords, camera_opt_to_camera, distortion_params_delta, disable_distortion=disable_distortion
+            camera_indices,
+            coords,
+            camera_opt_to_camera,
+            intrinsics_opt_to_camera,
+            distortion_params_delta,
+            disable_distortion=disable_distortion,
         )
 
         # If we have mandated that we don't keep the shape, then we flatten
@@ -496,6 +502,7 @@ class Cameras(TensorDataclass):
         camera_indices: Int[Tensor, "*num_rays num_cameras_batch_dims"],
         coords: Float[Tensor, "*num_rays 2"],
         camera_opt_to_camera: Optional[Float[Tensor, "*num_rays 3 4"]] = None,
+        intrinsic_opt_to_camera: Optional[torch.nn.Module] = None,
         distortion_params_delta: Optional[Float[Tensor, "*num_rays 6"]] = None,
         disable_distortion: bool = False,
     ) -> RayBundle:
@@ -605,6 +612,9 @@ class Cameras(TensorDataclass):
             + str(cx.shape)
             + str(cy.shape)
         )
+
+        if intrinsic_opt_to_camera is not None:
+            fx, fy, cx, cy = intrinsic_opt_to_camera(fx, fy, cx, cy)
 
         # Get our image coordinates and image coordinates offset by 1 (offsets used for dx, dy calculations)
         # Also make sure the shapes are correct

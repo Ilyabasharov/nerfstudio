@@ -299,16 +299,27 @@ class VanillaPipeline(Pipeline):
         model_outputs = self._model(ray_bundle)  # train distributed data parallel model if world_size > 1
         metrics_dict = self.model.get_metrics_dict(model_outputs, batch)
 
-        if self.config.datamanager.camera_optimizer is not None:
-            camera_opt_param_group = self.config.datamanager.camera_optimizer.param_group
+        if self.config.datamanager.pose_optimizer is not None:
+            camera_opt_param_group = self.config.datamanager.pose_optimizer.param_group
             if camera_opt_param_group in self.datamanager.get_param_groups():
                 # Report the camera optimization metrics
-                metrics_dict["camera_opt_translation"] = (
-                    self.datamanager.get_param_groups()[camera_opt_param_group][0].data[:, :3].norm()
-                )
-                metrics_dict["camera_opt_rotation"] = (
-                    self.datamanager.get_param_groups()[camera_opt_param_group][0].data[:, 3:].norm()
-                )
+                camera_opt_params = self.datamanager.get_param_groups()[camera_opt_param_group][0]
+
+                metrics_dict["camera_opt_translation"] = camera_opt_params.data[:, :3].norm()
+                metrics_dict["camera_opt_rotation"] = camera_opt_params.data[:, 3:].norm()
+
+        if self.config.datamanager.intrinsic_optimizer is not None:
+            intrinsic_opt_param_group = self.config.datamanager.intrinsic_optimizer.param_group
+            if intrinsic_opt_param_group in self.datamanager.get_param_groups():
+                # Report the camera optimization metrics
+                intrinsic_opt_params = self.datamanager.get_param_groups()[intrinsic_opt_param_group]
+                for i, param_name in enumerate(("scale", "shift")):
+                    if param_name not in self.config.datamanager.intrinsic_optimizer.mode:
+                        continue
+                    metrics_dict[f"intrinsic_opt_fx_{param_name}"] = intrinsic_opt_params[i].data[0]
+                    metrics_dict[f"intrinsic_opt_fy_{param_name}"] = intrinsic_opt_params[i].data[1]
+                    metrics_dict[f"intrinsic_opt_cx_{param_name}"] = intrinsic_opt_params[i].data[2]
+                    metrics_dict[f"intrinsic_opt_cy_{param_name}"] = intrinsic_opt_params[i].data[3]
 
         loss_dict = self.model.get_loss_dict(model_outputs, batch, metrics_dict)
 
@@ -450,5 +461,7 @@ class VanillaPipeline(Pipeline):
         """
         datamanager_params = self.datamanager.get_param_groups()
         model_params = self.model.get_param_groups()
-        # TODO(ethan): assert that key names don't overlap
+        
+        assert not (model_params.keys() & datamanager_params.keys()), \
+            "Param groups names are overlaping."
         return {**datamanager_params, **model_params}
