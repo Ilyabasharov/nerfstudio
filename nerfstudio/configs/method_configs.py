@@ -348,15 +348,13 @@ method_configs["ziprefnerfacto"] = TrainerConfig(
             eval_num_rays_per_batch=4096,
             pose_optimizer=PoseOptimizerConfig(
                 mode="SO3xR3",
-                optimizer=RAdamOptimizerConfig(lr=6e-5, eps=1e-8, weight_decay=1e-4),
+                optimizer=RAdamOptimizerConfig(lr=6e-4, eps=1e-8, weight_decay=1e-4),
                 scheduler=ExponentialDecaySchedulerConfig(lr_final=1e-5, max_steps=50000),
             ),
             intrinsic_optimizer=IntrinsicOptimizerConfig(
                 mode="square_scale",
                 optimizer=RAdamOptimizerConfig(lr=6e-5, eps=1e-8, weight_decay=1e-4),
                 scheduler=ExponentialDecaySchedulerConfig(
-                    delay_steps=3000,
-                    lr_pre_warmup=0,
                     warmup_steps=3000,
                     lr_final=1e-5,
                     max_steps=50000,
@@ -380,10 +378,9 @@ method_configs["ziprefnerfacto"] = TrainerConfig(
             "scheduler": None,
         },
         "fields": {
-            "optimizer": RAdamOptimizerConfig(lr=7e-3, eps=1e-15, weight_decay=1e-6),
+            "optimizer": RAdamOptimizerConfig(lr=1e-2, eps=1e-15, weight_decay=1e-6),
             "scheduler": ExponentialDecaySchedulerConfig(
-                lr_pre_warmup=7e-3,
-                delay_steps=7000,
+                warmup_steps=3000,
                 lr_final=1e-4,
                 max_steps=80000,
             ),
@@ -762,11 +759,11 @@ method_configs["neus"] = TrainerConfig(
     optimizers={
         "fields": {
             "optimizer": AdamOptimizerConfig(lr=5e-4, eps=1e-15),
-            "scheduler": CosineDecaySchedulerConfig(warm_up_end=5000, learning_rate_alpha=0.05, max_steps=300000),
+            "scheduler": CosineDecaySchedulerConfig(warmup_steps=5000, learning_rate_alpha=0.05, max_steps=300000),
         },
         "field_background": {
             "optimizer": AdamOptimizerConfig(lr=5e-4, eps=1e-15),
-            "scheduler": CosineDecaySchedulerConfig(warm_up_end=5000, learning_rate_alpha=0.05, max_steps=300000),
+            "scheduler": CosineDecaySchedulerConfig(warmup_steps=5000, learning_rate_alpha=0.05, max_steps=300000),
         },
     },
     viewer=ViewerConfig(num_rays_per_chunk=1 << 15),
@@ -813,11 +810,11 @@ method_configs["neus-facto"] = TrainerConfig(
         },
         "fields": {
             "optimizer": AdamOptimizerConfig(lr=5e-4, eps=1e-15),
-            "scheduler": CosineDecaySchedulerConfig(warm_up_end=500, learning_rate_alpha=0.05, max_steps=20001),
+            "scheduler": CosineDecaySchedulerConfig(warmup_steps=500, learning_rate_alpha=0.05, max_steps=20001),
         },
         "field_background": {
             "optimizer": AdamOptimizerConfig(lr=5e-4, eps=1e-15),
-            "scheduler": CosineDecaySchedulerConfig(warm_up_end=500, learning_rate_alpha=0.05, max_steps=20001),
+            "scheduler": CosineDecaySchedulerConfig(warmup_steps=500, learning_rate_alpha=0.05, max_steps=20001),
         },
     },
     viewer=ViewerConfig(num_rays_per_chunk=1 << 15),
