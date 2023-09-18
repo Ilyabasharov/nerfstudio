@@ -61,9 +61,84 @@ class ShiftedSoftplus(nn.Softplus):
 
     def forward(self, input: Tensor) -> Tensor:
         return super().forward(input + self.shift)
-    
+
     def extra_repr(self) -> str:
         return f'beta={self.beta}, threshold={self.threshold}, shift={self.shift}'
+
+
+class Sine(nn.Module):
+    """Sine activation."""
+
+    __constants__ = ['freq', 'deg']
+    freq: float
+    deg: float
+
+    def __init__(
+        self,
+        freq: float = 1.0,
+        deg: float = 0.0,
+    ) -> None:
+        super().__init__()
+        self.freq = freq
+        self.deg = deg
+
+    def forward(self, input: Tensor) -> Tensor:
+        """Call forward and returns and processed tensor."""
+        return torch.sin(2 * torch.pi * self.freq + self.deg)
+
+    def extra_repr(self) -> str:
+        return f'freq={self.freq}, deg={self.deg}'
+
+
+class Exponential(nn.Module):
+    """Exponential activation."""
+
+    def forward(self, input: Tensor) -> Tensor:
+        """forward method"""
+        return torch.exp(input)
+
+
+class Gaussian(nn.Module):
+    """Gaussian activation from GARF
+    https://arxiv.org/pdf/2204.05735.pdf."""
+
+    __constants__ = ['sigma']
+    sigma: float
+
+    def __init__(
+        self,
+        sigma: float = 0.05,
+    ) -> None:
+        super().__init__()
+        self.sigma = sigma
+
+    def forward(self, input: Tensor) -> Tensor:
+        """forward method"""
+        return (-0.5 * input ** 2 / self.sigma ** 2).exp()
+
+
+class Squareplus(nn.Module):
+    """Squareplus activation presented https://arxiv.org/pdf/2112.11687.pdf.
+    This function produces stable results when inputs is high enough.
+    """
+
+    __constants__ = ['beta', 'shift']
+    beta: float
+    shift: float
+
+    def __init__(
+        self,
+        beta: float = 1.0,
+        shift: float = 4,
+    ) -> None:
+        super().__init__()
+        self.beta = beta
+        self.shift = shift
+
+    def forward(self, input: Tensor) -> Tensor:
+        """Call forward and returns and processed tensor."""
+        _input = input * self.beta
+        return 1 / (2 * self.beta) * (_input + torch.sqrt(_input * _input + self.shift))
 
 
 if TYPE_CHECKING:

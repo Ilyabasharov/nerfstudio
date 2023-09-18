@@ -296,7 +296,10 @@ def normalize_with_norm(x: torch.Tensor, dim: int) -> Tuple[torch.Tensor, torch.
         Tuple of normalized tensor and corresponding norm.
     """
 
-    norm = torch.maximum(torch.linalg.vector_norm(x, dim=dim, keepdims=True), torch.tensor([_EPS]).to(x))
+    norm = torch.maximum(
+        torch.linalg.vector_norm(x, dim=dim, keepdims=True),
+        torch.tensor([_EPS]).to(x)
+    )
     return x / norm, norm
 
 

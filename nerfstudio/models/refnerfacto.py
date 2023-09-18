@@ -19,12 +19,17 @@ RefNerfacto implementation.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Type, Optional, Tuple
+from typing import Type, Optional, Tuple, List
 
 from nerfstudio.models.nerfacto import NerfactoModel, NerfactoModelConfig
 from nerfstudio.model_components.losses import CharbonnierLoss
 from nerfstudio.fields.refnerfacto_field import RefNerfactoField
 from nerfstudio.model_components.renderers import RoughnessRenderer
+from nerfstudio.engine.callbacks import (
+    TrainingCallback,
+    TrainingCallbackAttributes,
+    TrainingCallbackLocation,
+)
 
 
 @dataclass
@@ -32,8 +37,14 @@ class RefNerfactoModelConfig(NerfactoModelConfig):
     """RefNerfacto Model Config"""
 
     _target: Type = field(default_factory=lambda: RefNerfactoModel)
-    bottleneck_width: int = 256
-    """The width of the bottleneck vector. Defaults to 256."""
+    geo_feat_dim: int = 127
+    """Geo feature vector dim."""
+    bottleneck_layer_width: int = 256
+    """Bottleneck layer width."""
+    bottleneck_noise: float = 0.0
+    """Std of bottleneck noise."""
+    bottleneck_noise_steps: int = 10000
+    """Steps of applying bottleneck noise."""
     deg_view: int = 4
     """Degree of encoding for viewdirs or refdirs."""
     use_reflections: bool = True
@@ -95,6 +106,7 @@ class RefNerfactoModel(NerfactoModel):
         self.field = RefNerfactoField(
             self.scene_box.aabb,
             self.bundle_adjustment,
+            geo_feat_dim=self.config.geo_feat_dim,
             hidden_dim=self.config.hidden_dim,
             num_levels=self.config.num_levels,
             max_res=self.config.max_res,
@@ -108,7 +120,9 @@ class RefNerfactoModel(NerfactoModel):
             appearance_embedding_dim=self.config.appearance_embed_dim,
             regularize_function=self.regularize_function,
             compute_hash_regularization=self.config.compute_hash_regularization,
-            bottleneck_width=self.config.bottleneck_width,
+            bottleneck_noise=self.config.bottleneck_noise,
+            bottleneck_noise_steps=self.config.bottleneck_noise_steps,
+            bottleneck_layer_width=self.config.bottleneck_layer_width,
             deg_view=self.config.deg_view,
             use_reflections=self.config.use_reflections,
             use_ide_enc=self.config.use_ide_enc,
@@ -127,3 +141,19 @@ class RefNerfactoModel(NerfactoModel):
         self.rgb_loss = CharbonnierLoss()
 
         self.roughness_renderer = RoughnessRenderer()
+
+    def get_training_callbacks(
+        self, training_callback_attributes: TrainingCallbackAttributes,
+    ) -> List[TrainingCallback]:
+        callbacks = super().get_training_callbacks(training_callback_attributes)
+
+        if self.config.bottleneck_noise > 0:
+            callbacks.append(
+                TrainingCallback(
+                    where_to_run=[TrainingCallbackLocation.BEFORE_TRAIN_ITERATION],
+                    update_every_num_iters=1,
+                    func=self.field._set_bottleneck_noise,
+                )
+            )
+
+        return callbacks

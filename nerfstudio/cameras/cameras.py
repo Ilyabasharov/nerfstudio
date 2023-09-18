@@ -320,7 +320,7 @@ class Cameras(TensorDataclass):
         coords: Optional[Float[Tensor, "*num_rays 2"]] = None,
         camera_opt_to_camera: Optional[Float[Tensor, "*num_rays 3 4"]] = None,
         intrinsics_opt_to_camera: Optional[torch.nn.Module] = None,
-        distortion_params_delta: Optional[Float[Tensor, "*num_rays 6"]] = None,
+        distortion_opt_to_camera: Optional[torch.nn.Module] = None,
         keep_shape: Optional[bool] = None,
         disable_distortion: bool = False,
         aabb_box: Optional[SceneBox] = None,
@@ -332,7 +332,8 @@ class Cameras(TensorDataclass):
             - camera_indices: (num_rays:..., num_cameras_batch_dims)
             - coords: (num_rays:..., 2)
             - camera_opt_to_camera: (num_rays:..., 3, 4) or None
-            - distortion_params_delta: (num_rays:..., 6) or None
+            - intrinsics_opt_to_camera: nn.Module or None
+            - distiortion_opt_to_camera: nn.Module or None
 
         Read the docstring for _generate_rays_from_coords for more information on how we generate the rays
         after we have standardized the arguments.
@@ -361,7 +362,7 @@ class Cameras(TensorDataclass):
             camera_indices: Camera indices of the flattened cameras object to generate rays for.
             coords: Coordinates of the pixels to generate rays for. If None, the full image will be rendered.
             camera_opt_to_camera: Optional transform for the camera to world matrices.
-            distortion_params_delta: Optional delta for the distortion parameters.
+            distiortion_opt_to_camera: Optional delta for the distortion parameters.
             keep_shape: If None, then we default to the regular behavior of flattening if cameras is jagged, otherwise
                 keeping dimensions. If False, we flatten at the end. If True, then we keep the shape of the
                 camera_indices and coords tensors (if we can).
@@ -375,13 +376,11 @@ class Cameras(TensorDataclass):
         assert isinstance(camera_indices, (torch.Tensor, int)), "camera_indices must be a tensor or int"
         assert coords is None or isinstance(coords, torch.Tensor), "coords must be a tensor or None"
         assert camera_opt_to_camera is None or isinstance(camera_opt_to_camera, torch.Tensor)
-        assert distortion_params_delta is None or isinstance(distortion_params_delta, torch.Tensor)
         if isinstance(camera_indices, torch.Tensor) and isinstance(coords, torch.Tensor):
             num_rays_shape = camera_indices.shape[:-1]
             errormsg = "Batch dims of inputs must match when inputs are all tensors"
             assert coords.shape[:-1] == num_rays_shape, errormsg
             assert camera_opt_to_camera is None or camera_opt_to_camera.shape[:-2] == num_rays_shape, errormsg
-            assert distortion_params_delta is None or distortion_params_delta.shape[:-1] == num_rays_shape, errormsg
 
         # If zero dimensional, we need to unsqueeze to get a batch dimension and then squeeze later
         if not self.shape:
@@ -440,11 +439,6 @@ class Cameras(TensorDataclass):
                 if camera_opt_to_camera is not None
                 else None
             )
-            distortion_params_delta = (  # (h, w, num_rays, 6) or None
-                distortion_params_delta.broadcast_to(coords.shape[:-1] + (6,))
-                if distortion_params_delta is not None
-                else None
-            )
 
         # If camera indices was an int or coords was none, we need to broadcast our indices along batch dims
         camera_indices = camera_indices.broadcast_to(coords.shape[:-1] + (len(cameras.shape),)).to(torch.long)
@@ -453,7 +447,6 @@ class Cameras(TensorDataclass):
         assert isinstance(coords, torch.Tensor) and isinstance(camera_indices, torch.Tensor)
         assert camera_indices.shape[-1] == len(cameras.shape)
         assert camera_opt_to_camera is None or camera_opt_to_camera.shape[:-2] == coords.shape[:-1]
-        assert distortion_params_delta is None or distortion_params_delta.shape[:-1] == coords.shape[:-1]
 
         # This will do the actual work of generating the rays now that we have standardized the inputs
         # raybundle.shape == (num_rays) when done
@@ -463,7 +456,7 @@ class Cameras(TensorDataclass):
             coords,
             camera_opt_to_camera,
             intrinsics_opt_to_camera,
-            distortion_params_delta,
+            distortion_opt_to_camera,
             disable_distortion=disable_distortion,
         )
 
@@ -503,7 +496,7 @@ class Cameras(TensorDataclass):
         coords: Float[Tensor, "*num_rays 2"],
         camera_opt_to_camera: Optional[Float[Tensor, "*num_rays 3 4"]] = None,
         intrinsic_opt_to_camera: Optional[torch.nn.Module] = None,
-        distortion_params_delta: Optional[Float[Tensor, "*num_rays 6"]] = None,
+        distortion_opt_to_camera: Optional[torch.nn.Module] = None,
         disable_distortion: bool = False,
     ) -> RayBundle:
         """Generates rays for the given camera indices and coords where self isn't jagged
@@ -566,7 +559,11 @@ class Cameras(TensorDataclass):
                 In terms of shape, it follows the same rules as coords, but indexing into it with [i:...] gets you
                 the 2D camera to world transform matrix for the camera optimization at RayBundle[i:...].
 
-            distortion_params_delta: Optional delta for the distortion parameters.
+            intrinsics_opt_to_camera: Optional delta correction network for the intrinsics parameters.
+                In terms of shape, it follows the same rules as coords, but indexing into it with [i:...] gets you
+                the 1D tensor with the 4 intrinsics parameters for the camera optimization at RayBundle[i:...].
+
+            distortion_opt_to_camera: Optional delta correction network delta for the distortion parameters.
                 In terms of shape, it follows the same rules as coords, but indexing into it with [i:...] gets you
                 the 1D tensor with the 6 distortion parameters for the camera optimization at RayBundle[i:...].
 
@@ -585,7 +582,6 @@ class Cameras(TensorDataclass):
         assert coords.shape == num_rays_shape + (2,)
         assert coords.shape[-1] == 2
         assert camera_opt_to_camera is None or camera_opt_to_camera.shape == num_rays_shape + (3, 4)
-        assert distortion_params_delta is None or distortion_params_delta.shape == num_rays_shape + (6,)
 
         # Here, we've broken our indices down along the num_cameras_batch_dims dimension allowing us to index by all
         # of our output rays at each dimension of our cameras object
@@ -634,12 +630,15 @@ class Cameras(TensorDataclass):
         # Undistorts our images according to our distortion parameters
         if not disable_distortion:
             distortion_params = None
-            if self.distortion_params is not None:
-                distortion_params = self.distortion_params[true_indices]
-                if distortion_params_delta is not None:
-                    distortion_params = distortion_params + distortion_params_delta
-            elif distortion_params_delta is not None:
-                distortion_params = distortion_params_delta
+            if distortion_opt_to_camera is not None:
+                distortion_params = distortion_opt_to_camera(
+                    indices=camera_indices,
+                    distortion_params=(
+                        self.distortion_params[true_indices]
+                        if self.distortion_params is not None
+                        else None
+                    )
+                )
 
             # Do not apply distortion for equirectangular images
             if distortion_params is not None:
@@ -757,8 +756,6 @@ class Cameras(TensorDataclass):
 
             rotation = c2w[..., :3, :3]
 
-            -torch.pi * ((x - cx) / fx)[0]
-
             # interocular axis of the VR180 camera
             vr180_x_axis = torch.tensor([1, 0, 0], device=c2w.device)
 
@@ -867,7 +864,9 @@ class Cameras(TensorDataclass):
         times = self.times[camera_indices, 0] if self.times is not None else None
 
         metadata = (
-            self._apply_fn_to_dict(self.metadata, lambda x: x[true_indices]) if self.metadata is not None else None
+            self._apply_fn_to_dict(self.metadata, lambda x: x[true_indices])
+            if self.metadata is not None
+            else None
         )
         if metadata is not None:
             metadata["directions_norm"] = directions_norm[0].detach()

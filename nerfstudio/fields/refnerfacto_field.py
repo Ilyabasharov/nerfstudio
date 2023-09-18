@@ -21,6 +21,7 @@ from typing import Literal, Optional, Callable, Dict
 import torch
 import math
 from torch import Tensor, nn
+import numpy as np
 
 from nerfstudio.fields.base_field import get_normalized_directions
 from nerfstudio.cameras.rays import RaySamples, RayBundle
@@ -28,12 +29,12 @@ from nerfstudio.field_components.mlp import MLP
 from nerfstudio.field_components.spatial_distortions import SpatialDistortion
 from nerfstudio.fields.nerfacto_field import NerfactoField
 from nerfstudio.cameras.bundle_adjustment import HashBundleAdjustment
-from nerfstudio.field_components.encodings import IDEncoding
+from nerfstudio.field_components.encodings import IDEncoding, NeRFEncoding
 from nerfstudio.field_components.field_heads import FieldHeadNames
 from nerfstudio.utils.math import reflect, linear_to_srgb
-from nerfstudio.field_components.activations import trunc_exp
 
 REF_CONSTANT = math.log(3.0)
+EPS = 1e-8
 
 
 class RefNerfactoField(NerfactoField):
@@ -72,6 +73,7 @@ class RefNerfactoField(NerfactoField):
         use_pred_specular_tint: if True, predict the specular tint
         use_n_dot_v: if True, feed dot(n * viewdir) to 2nd MLP
         bottleneck_width: the width of the bottleneck vector
+        bottleneck_noise: std of bottleneck noise
         rgb_padding: padding added to the RGB outputs
         rgb_premultiplier: premultiplier on RGB before activation
         rgb_bias: the shift added to raw colors pre-activation
@@ -119,7 +121,10 @@ class RefNerfactoField(NerfactoField):
         use_pred_diffuse_color: float = True,
         use_pred_specular_tint: float = True,
         use_n_dot_v: float = True,
-        bottleneck_width: int = 256,
+        bottleneck_width: int = 128,
+        bottleneck_layer_width: int = 64,
+        bottleneck_noise: float = 0.001,
+        bottleneck_noise_steps: int = 10000,
         rgb_padding: float = 0.001,
         rgb_premultiplier: float = 1.0,
         rgb_bias: float = 0.0,
@@ -150,10 +155,10 @@ class RefNerfactoField(NerfactoField):
             use_pred_normals=use_pred_normals,
             use_average_appearance_embedding=use_average_appearance_embedding,
             use_appearance_embedding=use_appearance_embedding,
-            shift_scale_out_dim=bottleneck_width,
             spatial_distortion=spatial_distortion,
             compute_hash_regularization=compute_hash_regularization,
             regularize_function=regularize_function,
+            shift_scale_out_dim=bottleneck_width,
             implementation=implementation,
         )
 
@@ -166,16 +171,26 @@ class RefNerfactoField(NerfactoField):
         self.rgb_padding = rgb_padding
         self.rgb_premultiplier = rgb_premultiplier
         self.rgb_bias = rgb_bias
-        self.bottleneck_width = bottleneck_width
+        self.bottleneck_noise_init = bottleneck_noise
+        self.bottleneck_noise = bottleneck_noise
+        self.bottleneck_noise_steps = bottleneck_noise_steps
 
         in_dim_mlps = self.geo_feat_dim + self.position_encoding.get_out_dim()
 
+        self.bottleneck_encoding = NeRFEncoding(
+            in_dim=self.geo_feat_dim,
+            min_freq_exp=0,
+            max_freq_exp=2 - 1,
+            num_frequencies=2,
+            implementation=implementation,
+        )
+
         self.mlp_pred_bottleneck = MLP(
-            in_dim=in_dim_mlps,
+            in_dim=self.bottleneck_encoding.get_out_dim() + self.position_encoding.get_out_dim(),
             num_layers=3,
-            layer_width=64,
+            layer_width=bottleneck_layer_width,
             out_dim=bottleneck_width,
-            activation=nn.ReLU(),
+            activation=nn.LeakyReLU(),
             out_activation=None,
             implementation=implementation,
         )
@@ -185,9 +200,9 @@ class RefNerfactoField(NerfactoField):
             self.mlp_pred_raw_roughness = MLP(
                 in_dim=in_dim_mlps,
                 num_layers=3,
-                layer_width=64,
+                layer_width=256,
                 out_dim=1,
-                activation=nn.ReLU(),
+                activation=nn.LeakyReLU(),
                 out_activation=None,
                 implementation=implementation,
             )
@@ -198,7 +213,7 @@ class RefNerfactoField(NerfactoField):
                 num_layers=3,
                 layer_width=64,
                 out_dim=3,
-                activation=nn.ReLU(),
+                activation=nn.LeakyReLU(),
                 out_activation=None,
                 implementation=implementation,
             )
@@ -209,19 +224,19 @@ class RefNerfactoField(NerfactoField):
                 num_layers=3,
                 layer_width=64,
                 out_dim=3,
-                activation=nn.ReLU(),
+                activation=nn.LeakyReLU(),
                 out_activation=nn.Sigmoid(),
                 implementation=implementation,
             )
 
-        mlp_head_in_dim = bottleneck_width
-        
+        mlp_head_in_dim = self.mlp_pred_bottleneck.get_out_dim()
+
         if self.use_appearance_embedding:
             mlp_head_in_dim += appearance_embedding_dim
 
         if use_n_dot_v:
             mlp_head_in_dim += 1
-        
+
         if use_ide_enc:
             self.ide_encoding = IDEncoding(deg_view=deg_view)
             mlp_head_in_dim += self.ide_encoding.get_out_dim()
@@ -334,7 +349,25 @@ class RefNerfactoField(NerfactoField):
             outputs[FieldHeadNames.DIFFUSE_COLOR] = pred_diffuse_color
 
         # bottleneck
+        inputs_mlps = torch.cat(
+            [
+                positions_encoded_flat,
+                self.bottleneck_encoding(
+                    density_embedding.view(-1, self.geo_feat_dim),
+                ),
+            ],
+            dim=-1,
+        )
+
         pred_bottleneck = self.mlp_pred_bottleneck(inputs_mlps)
+        if self.bottleneck_noise > 0:
+            pred_bottleneck = pred_bottleneck * torch.normal(
+                mean=0,
+                std=self.bottleneck_noise,
+                size=pred_bottleneck.shape,
+                device=pred_bottleneck.device,
+                dtype=pred_bottleneck.dtype,
+            )
 
         inputs_mlp_head = [
             pred_bottleneck * scale + shift,
@@ -380,15 +413,11 @@ class RefNerfactoField(NerfactoField):
         # If using diffuse/specular colors, then `rgb` is treated as linear
         # specular color. Otherwise it's treated as the color itself.
         rgb = torch.nn.functional.sigmoid(
-            self.mlp_head(inputs_mlp_head) * \
-            self.rgb_premultiplier + \
-            self.rgb_bias
+            self.mlp_head(inputs_mlp_head)
+            * self.rgb_premultiplier
+            + self.rgb_bias
         )
 
-        if rgb.isnan().any():
-            import ipdb; ipdb.set_trace()
-            c = self.mlp_head(inputs_mlp_head)
-            
         if self.use_pred_diffuse_color:
             # Initialize linear diffuse color around 0.25, so that the combined
             # linear color is initialized around 0.5.
@@ -400,7 +429,7 @@ class RefNerfactoField(NerfactoField):
             # Combine specular and diffuse components and tone map to sRGB.
             rgb = linear_to_srgb(
                 specular_linear + pred_diffuse_color.view(-1, 3), # type: ignore
-            ).clip_(0.0, 1.0) # type: ignore
+            ).clip(0.0, 1.0) # type: ignore
 
         # Apply padding, mapping color to [-rgb_padding, 1+rgb_padding].
         rgb = rgb * (1 + 2 * self.rgb_padding) - self.rgb_padding
@@ -411,3 +440,10 @@ class RefNerfactoField(NerfactoField):
             outputs[FieldHeadNames.HASH_DECAY] = self.mlp_base_grid.regularize_hash_pyramid(self.regularize_function)
 
         return outputs
+
+    def _set_bottleneck_noise(self, step: int) -> None:
+        self.bottleneck_noise = np.interp(
+            x=step,
+            xp=[0, self.bottleneck_noise_steps],
+            fp=[self.bottleneck_noise_init, 0.0],
+        )

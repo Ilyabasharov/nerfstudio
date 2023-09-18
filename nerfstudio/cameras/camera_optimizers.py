@@ -139,20 +139,22 @@ class IntrinsicOptimizerConfig(InstantiateConfig):
     _target: Type = field(default_factory=lambda: IntrinsicOptimizer)
 
     mode: Literal["off", "shift", "scale+shift", "square_scale", "square_scale+shift"] = "off"
-    """Pose optimization strategy to use. If enabled, we recommend SO3xR3."""
+    """Intrinsics optimization strategy to use. If enabled, we recommend square_scale."""
     optimizer: OptimizerConfig = field(default_factory=lambda: AdamOptimizerConfig(lr=6e-4, eps=1e-15))
     """Optimizer parameters for intrinsic optimization."""
     scheduler: SchedulerConfig = field(default_factory=lambda: ExponentialDecaySchedulerConfig(max_steps=10000))
-    """Learning rate scheduler for camera optimizer."""
+    """Learning rate scheduler for intrinsic optimizer."""
     param_group: tyro.conf.Suppress[str] = "intrinsic_opt"
-    """Name of the parameter group used for pose optimization.
+    """Name of the parameter group used for intrinsic optimization.
     Can be any string that doesn't conflict with other groups."""
 
 
 class IntrinsicOptimizer(nn.Module):
-    """Layer that modifies camera intrinsics to be optimized as well as the field during training."""
+    """Layer that modifies camera intrinsics to be
+    optimized as well as the field during training."""
 
     config: IntrinsicOptimizerConfig
+    num_params: int = 4
 
     def __init__(
         self,
@@ -162,8 +164,8 @@ class IntrinsicOptimizer(nn.Module):
         num_cameras: int = 1,
         **kwargs,
     ) -> None:
-        super().__init__()
         assert num_cameras == 1, "More than 1 intrinsic optimizer are not supported yet."
+        super().__init__()
         self.config = config
         self.num_cameras = num_cameras
         self.device = device
@@ -174,17 +176,17 @@ class IntrinsicOptimizer(nn.Module):
             pass
         elif self.config.mode in ("shift", "scale+shift", "square_scale", "square_scale+shift"):
             for param in ("scale", "shift"):
-                num_scale_param = 4 if param in self.config.mode else 0
+                num_scale_param = self.num_params if param in self.config.mode else 0
                 init_func: Callable = torch.ones if param == "scale" else torch.zeros
 
                 self.register_parameter(
-                    name=f"intrinsic_adjustment_{param}",
+                    name=f"{config.param_group}_adjustment_{param}",
                     param=torch.nn.Parameter(
                         init_func(num_scale_param, device=device),
                         requires_grad=True,
                     )
                 )
-            
+
             self.scale_tf = lambda x: x ** 2 \
                 if "square" in self.config.mode \
                 else lambda x: x
@@ -197,6 +199,7 @@ class IntrinsicOptimizer(nn.Module):
         fy: Float[Tensor, "1"],
         cx: Float[Tensor, "1"],
         cy: Float[Tensor, "1"],
+        indices: Optional[Int[Tensor, "camera_indices"]] = None,
     ) -> Tuple[
             Float[Tensor, "1"],
             Float[Tensor, "1"],
@@ -217,17 +220,80 @@ class IntrinsicOptimizer(nn.Module):
         if self.config.mode == "off":
             pass
         elif "shift" in self.config.mode or "scale" in self.config.mode:
-            if "shift" in self.config.mode:
-                fx += self.intrinsic_adjustment_shift[0]
-                fy += self.intrinsic_adjustment_shift[1]
-                cx += self.intrinsic_adjustment_shift[2]
-                cy += self.intrinsic_adjustment_shift[3]
             if "scale" in self.config.mode:
-                fx *= self.scale_tf(self.intrinsic_adjustment_scale[0])
-                fy *= self.scale_tf(self.intrinsic_adjustment_scale[1])
-                cx *= self.scale_tf(self.intrinsic_adjustment_scale[2])
-                cy *= self.scale_tf(self.intrinsic_adjustment_scale[3])
+                fx *= self.scale_tf(self.intrinsic_opt_adjustment_scale[0])
+                fy *= self.scale_tf(self.intrinsic_opt_adjustment_scale[1])
+                cx *= self.scale_tf(self.intrinsic_opt_adjustment_scale[2])
+                cy *= self.scale_tf(self.intrinsic_opt_adjustment_scale[3])
+
+            if "shift" in self.config.mode:
+                fx += self.intrinsic_opt_adjustment_shift[0]
+                fy += self.intrinsic_opt_adjustment_shift[1]
+                cx += self.intrinsic_opt_adjustment_shift[2]
+                cy += self.intrinsic_opt_adjustment_shift[3]
         else:
             assert_never(self.config.mode)
 
         return fx, fy, cx, cy
+
+
+@dataclass
+class DistortionOptimizerConfig(IntrinsicOptimizerConfig):
+    """Configuration of optimization for camera distortion."""
+
+    _target: Type = field(default_factory=lambda: DistortionOptimizer)
+
+    mode: Literal["off", "shift"] = "off"
+    """Distortion optimization strategy to use. If enabled, we recommend shift."""
+    param_group: tyro.conf.Suppress[str] = "distortion_opt"
+    """Name of the parameter group used for distortion optimization.
+    Can be any string that doesn't conflict with other groups."""
+
+
+class DistortionOptimizer(IntrinsicOptimizer):
+    """Layer that modifies camera distortion to be
+    optimized as well as the field during training."""
+
+    config: DistortionOptimizerConfig
+    num_params: int = 6
+
+    def __init__(
+        self,
+        config: DistortionOptimizerConfig,
+        device: Union[torch.device, str],
+        non_trainable_camera_indices: Optional[Int[Tensor, "num_non_trainable_cameras"]] = None,
+        num_cameras: int = 1,
+        **kwargs,
+    ) -> None:
+        assert num_cameras == 1, "More than 1 distortion optimizer are not supported yet."
+        super().__init__(
+            config=config,
+            device=device,
+            non_trainable_camera_indices=non_trainable_camera_indices,
+            num_cameras=num_cameras,
+        )
+
+    def forward(
+        self,
+        indices: Int[Tensor, "camera_indices"],
+        distortion_params: Optional[Float[Tensor, "*batch_dist_params 6"]] = None,
+    ) -> Float[Tensor, "*batch_dist_params 6"]:
+        """Distortion correction
+        Args:
+            distortion_params: the distortion parameters [k1, k2, k3, k4, p1, p2].
+                Can be None.
+        Returns:
+            Corrected distortion params.
+        """
+        corrected_distortion = None
+        # Apply learned transformation delta.
+        if self.config.mode == "off":
+            pass
+        elif "shift" in self.config.mode:
+            corrected_distortion = getattr(self, f"{self.config.param_group}_adjustment_shift")[None].expand(indices.shape)
+            if distortion_params is not None:
+                corrected_distortion = distortion_params + corrected_distortion
+        else:
+            assert_never(self.config.mode)
+
+        return corrected_distortion

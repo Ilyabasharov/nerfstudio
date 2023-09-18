@@ -187,6 +187,7 @@ def conical_frustum_to_gaussian(
     return compute_3d_gaussian(directions, means, dir_variance, radius_variance)
 
 
+@torch_compile
 def multisampled_frustum_to_gaussian(
     origins: Float[Tensor, "*batch num_samples 3"],
     directions: Float[Tensor, "*batch num_samples 3"],
@@ -227,7 +228,7 @@ def multisampled_frustum_to_gaussian(
         ends**2 + 2 * t_m**2 + 3 / 7**0.5 * (2 * j / 5 - 1) * ((t_d**2 - t_m**2) ** 2 + 4 * t_m**4).sqrt()
     )  # [..., num_samples, 6]
 
-    deg = torch.pi / 3 * starts.new_tensor([0, 2, 4, 3, 5, 1]).broadcast_to(t.shape)
+    deg = torch.pi / 3 * starts.new_tensor([0, 2, 4, 3, 5, 1]).expand(t.shape)
     if rand:
         # randomly rotate and flip
         mask = torch.rand_like(starts) > 0.5  # [..., num_samples, 1]
@@ -246,7 +247,7 @@ def multisampled_frustum_to_gaussian(
                 == 0
             )
             .unsqueeze(-1)
-            .broadcast_to(starts.shape)
+            .expand(starts.shape)
         )  # [..., num_samples, 6]
         deg = torch.where(mask, deg, deg + torch.pi / 6.0)
         deg = torch.where(mask, deg, 5 * torch.pi / 3.0 - deg)
@@ -284,6 +285,7 @@ def multisampled_frustum_to_gaussian(
     means = means + origins[..., None, :]
 
     return Gaussians(mean=means, cov=stds)
+
 
 @torch_compile(dynamic=True, mode="reduce-overhead", backend="eager")
 def expected_sin(x_means: torch.Tensor, x_vars: torch.Tensor) -> torch.Tensor:
@@ -445,6 +447,7 @@ def power_fn(x: torch.Tensor, lam: float = -1.5, max_bound: float = 1e10) -> tor
     lam_1 = abs(lam - 1)
     return (lam_1 / lam) * ((x / lam_1 + 1) ** lam - 1)
 
+
 @torch_compile(dynamic=True, mode="reduce-overhead", backend="inductor")
 def inv_power_fn(
     x: torch.Tensor,
@@ -472,7 +475,7 @@ def inv_power_fn(
 @torch_compile(dynamic=True, mode="reduce-overhead", backend="eager")
 def erf_approx(x: torch.Tensor) -> torch.Tensor:
     """Error function approximation proposed in ZipNeRF paper (Eq. 11)."""
-    return torch.sign(x) * torch.sqrt(1 - torch.exp(-(4 / torch.pi) * x**2))
+    return torch.sign(x) * torch.sqrt(1 - torch.exp(-4 / torch.pi * x**2))
 
 
 def div_round_up(val: int, divisor: int) -> int:

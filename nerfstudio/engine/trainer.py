@@ -216,8 +216,8 @@ class Trainer:
         optimizer_config = self.config.optimizers.copy()
         param_groups = self.pipeline.get_param_groups()
         
-        for optimizer_group_name in ("pose", "intrinsic"):
-            optimizer_group_config = getattr(self.config.pipeline.datamanager, f"{optimizer_group_name}_optimizer")
+        for optimizer_group_name in ("pose", "intrinsic", "distortion"):
+            optimizer_group_config = getattr(self.config.pipeline.datamanager, f"{optimizer_group_name}_optimizer", None)
             if optimizer_group_config is not None and optimizer_group_config.mode != "off":
                 assert optimizer_group_config.param_group not in optimizer_config
                 optimizer_config[optimizer_group_config.param_group] = {
@@ -286,7 +286,9 @@ class Trainer:
                     # (https://pytorch.org/docs/stable/notes/cuda.html#cuda-memory-management)
                     # for more details about GPU memory management.
                     writer.put_scalar(
-                        name="GPU Memory (MB)", scalar=torch.cuda.max_memory_allocated() / (1024**2), step=step
+                        name="GPU Memory (MB)",
+                        scalar=torch.cuda.max_memory_allocated() / (1024**2),
+                        step=step,
                     )
 
                 # Do not perform evaluation if there are no validation images

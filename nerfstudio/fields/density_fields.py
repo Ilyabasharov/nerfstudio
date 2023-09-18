@@ -32,7 +32,7 @@ from nerfstudio.fields.base_field import Field, FieldHeadNames
 from nerfstudio.utils.math import erf_approx
 from nerfstudio.cameras.bundle_adjustment import HashBundleAdjustment
 
-EPS = 1.0e-7
+EPS = 1.0e-8
 ZIP_CONSTANT = math.sqrt(8)
 
 

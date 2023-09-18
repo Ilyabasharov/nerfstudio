@@ -335,7 +335,8 @@ class PatchPixelSampler(PixelSampler):
             )
 
             yys, xxs = torch.meshgrid(
-                torch.arange(self.config.patch_size, device=device), torch.arange(self.config.patch_size, device=device)
+                torch.arange(self.config.patch_size, device=device),
+                torch.arange(self.config.patch_size, device=device),
             )
             indices[:, ..., 1] += yys - half_patch_size
             indices[:, ..., 2] += xxs - half_patch_size
@@ -345,7 +346,10 @@ class PatchPixelSampler(PixelSampler):
         else:
             sub_bs = batch_size // (self.config.patch_size**2)
             indices = torch.rand((sub_bs, 3), device=device) * torch.tensor(
-                [num_images, image_height - self.config.patch_size, image_width - self.config.patch_size],
+                [
+                    num_images, image_height - self.config.patch_size,
+                    image_width - self.config.patch_size,
+                ],
                 device=device,
             )
 
@@ -356,7 +360,8 @@ class PatchPixelSampler(PixelSampler):
             )
 
             yys, xxs = torch.meshgrid(
-                torch.arange(self.config.patch_size, device=device), torch.arange(self.config.patch_size, device=device)
+                torch.arange(self.config.patch_size, device=device),
+                torch.arange(self.config.patch_size, device=device),
             )
             indices[:, ..., 1] += yys
             indices[:, ..., 2] += xxs

@@ -20,6 +20,8 @@ from typing import Dict
 
 import gc
 import numpy as np
+import numpy.typing as npt
+import cv2
 
 from nerfstudio.data.dataparsers.base_dataparser import DataparserOutputs
 from nerfstudio.model_components import losses
@@ -80,10 +82,15 @@ class DepthDataset(InputDataset):
 
                 for i in track(range(len(filenames)), description="Generating depth images"):
                     image_filename = filenames[i]
-                    pil_image = Image.open(image_filename)
-                    image = np.array(pil_image, dtype="uint8")  # shape is (h, w) or (h, w, 3 or 4)
+                    image: npt.NDArray[np.uint8] = cv2.imread(str(image_filename.absolute()))
+                    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB) # shape is (h, w) or (h, w, 3 or 4)
+                    if self.scale_factor != 1.0:
+                        height, width, _ = image.shape
+                        newsize = (int(width * self.scale_factor), int(height * self.scale_factor))
+                        image = cv2.resize(image, newsize, interpolation=cv2.INTER_AREA)
                     if len(image.shape) == 2:
                         image = image[:, :, None].repeat(3, axis=2)
+                    
                     image = torch.from_numpy(image.astype("float32") / 255.0)
 
                     with torch.no_grad():

@@ -55,15 +55,6 @@ class ZipRefNerfactoModel(ZipNerfactoModel):
     def populate_modules(self):
         """Set the fields and modules."""
         super().populate_modules()
-
-        # Make sure that normals are computed if reflection direction is used.
-        if self.config.use_reflections and not self.config.predict_normals:
-            raise ValueError(
-                'Normals must be computed for reflection directions.')
-        
-        if not (self.config.use_ide_enc and self.config.use_pred_roughness):
-            raise ValueError(
-                'IDE cannot be computed without roughness.')
         
         # combined field
         self.field = ZipRefNerfactoField(
@@ -84,7 +75,6 @@ class ZipRefNerfactoModel(ZipNerfactoModel):
             scale_featurization=self.config.scale_featurization,
             regularize_function=self.regularize_function,
             compute_hash_regularization=self.config.compute_hash_regularization,
-            bottleneck_width=self.config.bottleneck_width,
             deg_view=self.config.deg_view,
             use_reflections=self.config.use_reflections,
             use_ide_enc=self.config.use_ide_enc,

@@ -42,7 +42,7 @@ def delay(cls, lr_init: float) -> Callable:
             if cls.config.delay_steps != 0:
                 if step <= cls.config.delay_steps:
                     learning_factor = cls.config.lr_pre_warmup / lr_init
-                elif cls.config.delay_steps > 0:
+                else:
                     compenastion = cls.config.delay_steps * (
                         1 - ((step - cls.config.delay_steps) / cls.config.max_steps)
                     )
@@ -147,7 +147,7 @@ class ExponentialDecayScheduler(Scheduler):
             lr = 0
             if step > self.config.max_steps:
                 lr = self.config.lr_final
-            elif step < self.config.warmup_steps:
+            elif self.config.warmup_steps > 0 and self.config.warmup_steps > step:
                 if self.config.ramp == "cosine":
                     lr = self.config.lr_pre_warmup + (lr_init - self.config.lr_pre_warmup) * np.sin(
                         0.5 * np.pi * np.clip(step / self.config.warmup_steps, 0, 1)
@@ -196,7 +196,7 @@ class CosineDecayScheduler(Scheduler):
 
         @delay(self, lr_init)
         def func(step: int):
-            if step < self.config.warmup_steps:
+            if self.config.warmup_steps > 0 and self.config.warmup_steps > step:
                 learning_factor = (
                     self.config.lr_pre_warmup
                     + (lr_init - self.config.lr_pre_warmup) * step / self.config.warmup_steps

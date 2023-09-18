@@ -46,7 +46,11 @@ from torch.nn import Parameter
 from torch.utils.data.distributed import DistributedSampler
 from typing_extensions import TypeVar
 
-from nerfstudio.cameras.camera_optimizers import PoseOptimizerConfig, IntrinsicOptimizerConfig
+from nerfstudio.cameras.camera_optimizers import (
+    PoseOptimizerConfig,
+    IntrinsicOptimizerConfig,
+    DistortionOptimizerConfig,
+)
 from nerfstudio.cameras.cameras import CameraType
 from nerfstudio.cameras.rays import RayBundle
 from nerfstudio.configs.base_config import InstantiateConfig
@@ -116,7 +120,9 @@ class DataManagerConfig(InstantiateConfig):
     pose_optimizer: Optional[PoseOptimizerConfig] = None
     """Specifies the camera pose optimizer used during training. Helpful if poses are noisy."""
     intrinsic_optimizer: Optional[IntrinsicOptimizerConfig] = None
-    """Specifies the camera pose optimizer used during training. Helpful if poses are noisy."""
+    """Specifies the camera intrinsic optimizer used during training. Helpful if intrinsic are noisy."""
+    distortion_optimizer: Optional[DistortionOptimizerConfig] = None
+    """Specifies the camera distortion optimizer used during training. Helpful if distortion are noisy."""
     masks_on_gpu: bool = False
     """Process masks on GPU for speed at the expense of memory, if True."""
     images_on_gpu: bool = False
@@ -343,8 +349,11 @@ class VanillaDataManagerConfig(DataManagerConfig):
     """Specifies the camera pose optimizer used during training.
     Helpful if poses are noisy, such as for data from Record3D."""
     intrinsic_optimizer: IntrinsicOptimizerConfig = IntrinsicOptimizerConfig()
-    """Specifies the camera pose optimizer used during training.
-    Helpful if poses are noisy, such as for data from Record3D."""
+    """Specifies the camera intrinsic optimizer used during training.
+    Helpful if intrinsic are noisy, such as for data from Record3D."""
+    distortion_optimizer: DistortionOptimizerConfig = DistortionOptimizerConfig()
+    """Specifies the camera distortion optimizer used during training.
+    Helpful if distortion are noisy, such as for data from Record3D."""
     collate_fn: Callable[[Any], Any] = cast(Any, staticmethod(nerfstudio_collate))
     """Specifies the collate function to use for the train and eval dataloaders."""
     camera_res_scale_factor: float = 1.0
@@ -498,10 +507,14 @@ class VanillaDataManager(DataManager, Generic[TDataset]):
         self.intrinsic_optimizer = self.config.intrinsic_optimizer.setup(
             num_cameras=1, device=self.device,
         )
+        self.distortion_optimizer = self.config.distortion_optimizer.setup(
+            num_cameras=1, device=self.device,
+        )
         self.train_ray_generator = RayGenerator(
             self.train_dataset.cameras.to(self.device),
             self.train_pose_optimizer,
             self.intrinsic_optimizer,
+            self.distortion_optimizer,
         )
 
     def setup_eval(self):
@@ -527,6 +540,7 @@ class VanillaDataManager(DataManager, Generic[TDataset]):
             self.eval_dataset.cameras.to(self.device),
             self.eval_pose_optimizer,
             self.intrinsic_optimizer,
+            self.distortion_optimizer,
         )
         # for loading full images
         self.fixed_indices_eval_dataloader = FixedIndicesEvalDataloader(
@@ -585,13 +599,13 @@ class VanillaDataManager(DataManager, Generic[TDataset]):
         """
         param_groups = {}
 
-        for param_group_name in ("train_pose_optimizer", "intrinsic_optimizer"):
+        for param_group_name in ("train_pose_optimizer", "intrinsic_optimizer", "distortion_optimizer"):
             param_group_name_attr = getattr(self, param_group_name)
             opt_params = list(param_group_name_attr.parameters())
             if param_group_name_attr.config.mode != "off":
                 param_groups[param_group_name_attr.config.param_group] = opt_params
             else:
                 assert len(opt_params) == 0, \
-                    f"Params mode of group `{param_group_name}` is off, but it has training params."
+                    f"Params mode of group `{param_group_name}` is off, but it has trainable params."
 
         return param_groups

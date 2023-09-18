@@ -22,8 +22,9 @@ from jaxtyping import Float
 from torch import Tensor, nn
 
 from nerfstudio.field_components.base_field_component import FieldComponent
-from nerfstudio.utils.printing import print_tcnn_speed_warning
+from nerfstudio.field_components.activations import Sine, Exponential, Squareplus
 
+from nerfstudio.utils.printing import print_tcnn_speed_warning
 from nerfstudio.utils.rich_utils import CONSOLE
 
 try:
@@ -43,11 +44,16 @@ def activation_to_tcnn_string(activation: Union[nn.Module, None]) -> str:
     Returns:
         str: TCNN activation function string
     """
-
+    if isinstance(activation, Squareplus):
+        return "Squareplus"
+    if isinstance(activation, Exponential):
+        return "Exponential"
+    if isinstance(activation, Sine):
+        return "Sine"
     if isinstance(activation, nn.ReLU):
         return "ReLU"
     if isinstance(activation, nn.LeakyReLU):
-        return "Leaky ReLU"
+        return "LeakyReLU"
     if isinstance(activation, nn.Sigmoid):
         return "Sigmoid"
     if isinstance(activation, nn.Softplus):
@@ -56,9 +62,11 @@ def activation_to_tcnn_string(activation: Union[nn.Module, None]) -> str:
         return "Tanh"
     if isinstance(activation, type(None)):
         return "None"
-    tcnn_documentation_url = "https://github.com/NVlabs/tiny-cuda-nn/blob/master/DOCUMENTATION.md#activation-functions"
+    tcnn_documentation_url = \
+        "https://github.com/NVlabs/tiny-cuda-nn/blob/master/DOCUMENTATION.md#activation-functions"
     raise ValueError(
-        f"TCNN activation {activation} not supported for now.\nSee {tcnn_documentation_url} for TCNN documentation."
+        f"TCNN activation {activation} not supported for now.\n"
+        f"See {tcnn_documentation_url} for TCNN documentation."
     )
 
 

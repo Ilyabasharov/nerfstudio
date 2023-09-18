@@ -23,7 +23,10 @@ from typing import Type
 
 
 from nerfstudio.models.ziprefnerfacto import ZipRefNerfactoModel, ZipRefNerfactoModelConfig
-from nerfstudio.models.depth_nerfacto import DepthNerfactoModel, DepthNerfactoModelConfig
+from nerfstudio.models.depth_based.depth_nerfacto import (
+    DepthNerfactoModel,
+    DepthNerfactoModelConfig,
+)
 
 
 @dataclass

@@ -148,7 +148,7 @@ class NerfactoModelConfig(ModelConfig):
     Linear interpolation between (start, end) and full activation of hash grid from end onwards."""
     implementation: Literal["tcnn", "torch"] = "tcnn"
     """Which implementation to use for the model."""
-    appearance_embed_dim: int = 32
+    appearance_embed_dim: int = 128
     """Dimension of the appearance embedding."""
     supervise_pred_normals_by_density: bool = True
     """Whether to supervise predicted normals by density."""
@@ -166,6 +166,14 @@ class NerfactoModel(Model):
     def populate_modules(self):
         """Set the fields and modules."""
         super().populate_modules()
+
+        # Make sure that normals are computed if reflection direction is used.
+        if not self.config.use_appearance_embedding and self.config.appearance_embed_dim <= 32:
+            raise ValueError(
+                f'Got small value of appearance_embed_dim: {self.config.appearance_embed_dim}. '
+                'Increase it to 128 to get more stable training or set `use_appearance_embedding` '
+                'to true.'
+            )
 
         if self.config.disable_scene_contraction:
             self.scene_contraction = None

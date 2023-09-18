@@ -28,7 +28,10 @@ class SpatialDistortion(nn.Module):
     """Apply spatial distortions"""
 
     @abc.abstractmethod
-    def forward(self, positions: Union[Float[Tensor, "*bs 3"], Gaussians]) -> Union[Float[Tensor, "*bs 3"], Gaussians]:
+    def forward(
+        self,
+        positions: Union[Float[Tensor, "*bs 3"], Gaussians],
+    ) -> Union[Float[Tensor, "*bs 3"], Gaussians]:
         """
         Args:
             positions: Sample to distort
@@ -58,12 +61,13 @@ class SceneContraction(SpatialDistortion):
 
     """
 
-    def __init__(self, order: Optional[Union[float, int]] = None) -> None:
+    def __init__(self, order: Optional[Union[float, int, str]] = None) -> None:
         super().__init__()
         self.order = order
 
     def forward(self, positions):
         def contract(x: torch.Tensor) -> torch.Tensor:
+            """MipNeRF contraction function"""
             mag = torch.linalg.norm(x, ord=self.order, dim=-1)[..., None]
             return torch.where(mag < 1, x, (2 - (1 / mag)) * (x / mag))
 
@@ -96,7 +100,7 @@ class LinearizedSceneContraction(SpatialDistortion):
     Proposed only for Gausians. Part of code was taken from github.com/SuLvXiangXin/zipnerf-pytorch
     """
 
-    def __init__(self, order: Optional[Union[float, int]] = None) -> None:
+    def __init__(self, order: Optional[Union[float, int, str]] = None) -> None:
         super().__init__()
         self.order = order
 

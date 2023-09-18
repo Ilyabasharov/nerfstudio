@@ -28,7 +28,6 @@ from nerfstudio.field_components.spatial_distortions import LinearizedSceneContr
 from nerfstudio.model_components.losses import (
     zipnerf_loss,
     CharbonnierLoss,
-    interlevel_loss,
 )
 from nerfstudio.fields.zipnerfacto_field import ZipNerfactoField
 from nerfstudio.model_components.ray_samplers import PowerSampler
@@ -47,8 +46,8 @@ class ZipNerfactoModelConfig(NerfactoModelConfig):
     """Use the same proposal network. Otherwise use different ones."""
     proposal_net_args_list: List[Dict] = field(
         default_factory=lambda: [
-            {"hidden_dim": 16, "log2_hashmap_size": 21, "num_levels": 5, "max_res": 256, "use_linear": False, "features_per_level": 4},
-            {"hidden_dim": 16, "log2_hashmap_size": 21, "num_levels": 5, "max_res": 4096, "use_linear": False, "features_per_level": 4},
+            {"hidden_dim": 16, "log2_hashmap_size": 17, "num_levels": 5, "max_res": 256, "use_linear": False, "features_per_level": 2},
+            {"hidden_dim": 16, "log2_hashmap_size": 17, "num_levels": 7, "max_res": 4096, "use_linear": False, "features_per_level": 4},
         ]
     )
     """Arguments for the proposal density fields."""
@@ -56,16 +55,14 @@ class ZipNerfactoModelConfig(NerfactoModelConfig):
     """Maximum resolution of the hashmap for the base mlp."""
     log2_hashmap_size: int = 22
     """Size of the hashmap for the base mlp"""
-    features_per_level: int = 8
+    features_per_level: int = 4
     """How many hashgrid features per level"""
     num_nerf_samples_per_ray: int = 64
     """Number of samples per ray for the nerf network."""
     num_proposal_samples_per_ray: Tuple[int, ...] = (256, 128)
     """Number of samples per ray for each proposal network."""
-    interlevel_loss_mult: float = 1.0
+    interlevel_loss_mult: float = 1
     """Proposal loss multiplier."""
-    hash_decay_loss_mult: float = 1e-2
-    """Hash decay loss multiplier."""
     scale_featurization: bool = True
     """Scale featurization from appendix of ZipNeRF."""
     regularize_function: Literal["abs", "square"] = "square"

@@ -27,7 +27,6 @@ from nerfstudio.cameras.bundle_adjustment import HashBundleAdjustment
 from nerfstudio.field_components.spatial_distortions import LinearizedSceneContraction
 
 
-
 class ZipRefNerfactoField(ZipNerfactoField, RefNerfactoField):
     """Compound Field that uses TCNN with ideas from Zip- and Ref- Nerfs
 
@@ -63,7 +62,8 @@ class ZipRefNerfactoField(ZipNerfactoField, RefNerfactoField):
         use_pred_diffuse_color: if True, predict the diffuse & specular colors
         use_pred_specular_tint: if True, predict the specular tint
         use_n_dot_v: if True, feed dot(n * viewdir) to 2nd MLP
-        bottleneck_width: the width of the bottleneck vector
+        bottleneck_noise: std of bottleneck noise
+        bottleneck_noise_steps: number of steps applying to bottleneck noise
         rgb_padding: padding added to the RGB outputs
         rgb_premultiplier: premultiplier on RGB before activation
         rgb_bias: the shift added to raw colors pre-activation
@@ -113,7 +113,8 @@ class ZipRefNerfactoField(ZipNerfactoField, RefNerfactoField):
         use_pred_diffuse_color: float = True,
         use_pred_specular_tint: float = True,
         use_n_dot_v: float = True,
-        bottleneck_width: int = 256,
+        bottleneck_noise: float = 0.001,
+        bottleneck_noise_steps: int = 10000,
         rgb_padding: float = 0.001,
         rgb_premultiplier: float = 1.0,
         rgb_bias: float = 0.0,
@@ -157,7 +158,8 @@ class ZipRefNerfactoField(ZipNerfactoField, RefNerfactoField):
             use_pred_diffuse_color=use_pred_diffuse_color,
             use_pred_specular_tint=use_pred_specular_tint,
             use_n_dot_v=use_n_dot_v,
-            bottleneck_width=bottleneck_width,
+            bottleneck_noise=bottleneck_noise,
+            bottleneck_noise_steps=bottleneck_noise_steps,
             rgb_padding=rgb_padding,
             rgb_premultiplier=rgb_premultiplier,
             rgb_bias=rgb_bias,
@@ -195,4 +197,3 @@ class ZipRefNerfactoField(ZipNerfactoField, RefNerfactoField):
             compute_hash_regularization=compute_hash_regularization,
             implementation=implementation,
         )
-

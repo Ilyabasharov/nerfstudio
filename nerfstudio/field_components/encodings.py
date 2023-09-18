@@ -165,8 +165,9 @@ class NeRFEncoding(Encoding):
         in_tensor: Float[Tensor, "*bs input_dim"],
         covs: Optional[Float[Tensor, "*bs input_dim input_dim"]] = None,
     ) -> Float[Tensor, "*bs output_dim"]:
-        """Calculates NeRF encoding. If covariances are provided the encodings will be integrated as proposed
-            in mip-NeRF.
+        """Calculates NeRF encoding.
+            If covariances are provided the encodings will be integrated
+            as proposed in mip-NeRF.
 
         Args:
             in_tensor: For best performance, the input tensor should be between 0 and 1.
@@ -193,7 +194,9 @@ class NeRFEncoding(Encoding):
         return encoded_inputs
 
     def forward(
-        self, in_tensor: Float[Tensor, "*bs input_dim"], covs: Optional[Float[Tensor, "*bs input_dim input_dim"]] = None
+        self,
+        in_tensor: Float[Tensor, "*bs input_dim"],
+        covs: Optional[Float[Tensor, "*bs input_dim input_dim"]] = None,
     ) -> Float[Tensor, "*bs output_dim"]:
         if self.tcnn_encoding is not None:
             return self.tcnn_encoding(in_tensor)
@@ -472,11 +475,12 @@ class HashEncoding(Encoding):
     ) -> Shaped[Tensor, "*bs output_dim"]:
 
         out = self.custom_forward(in_tensor)
-        adjusted_out = self.bundle_adjustment(
-            out.view(-1, self.num_levels, self.features_per_level),
-        ).view(*out.shape)
+        if self.bundle_adjustment.use_bundle_adjust:
+            out = self.bundle_adjustment(
+                out.view(-1, self.num_levels, self.features_per_level),
+            ).view(*out.shape)
 
-        return adjusted_out
+        return out
 
 
 class TensorCPEncoding(Encoding):
@@ -865,14 +869,14 @@ class IDEncoding(Encoding):
         x = in_tensor[..., 0:1]
         y = in_tensor[..., 1:2]
         z = in_tensor[..., 2:3]
-        
+
         # avoid 0 + 0j exponentiation
         zero_xy = torch.logical_and(x == 0, y == 0)
         y = y + zero_xy
 
         vmz = z ** self.pow_level
         vmxy = (x + 1j * y) ** self.ml_array[0, :]
-        sph_harms = vmxy * torch.matmul(vmz, self.mat.to(in_tensor))
-        ide = sph_harms * torch.exp(-self.sigma.to(in_tensor) * roughness)
+        sph_harms = vmxy * torch.matmul(vmz, self.mat)
+        ide = sph_harms * torch.exp(-self.sigma * roughness)
 
         return torch.cat([torch.real(ide), torch.imag(ide)], dim=-1)

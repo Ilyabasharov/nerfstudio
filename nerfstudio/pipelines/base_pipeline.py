@@ -321,6 +321,21 @@ class VanillaPipeline(Pipeline):
                     metrics_dict[f"intrinsic_opt_cx_{param_name}"] = intrinsic_opt_params[i].data[2]
                     metrics_dict[f"intrinsic_opt_cy_{param_name}"] = intrinsic_opt_params[i].data[3]
 
+        if self.config.datamanager.distortion_optimizer is not None:
+            distortion_opt_param_group = self.config.datamanager.distortion_optimizer.param_group
+            if distortion_opt_param_group in self.datamanager.get_param_groups():
+                # Report the camera optimization metrics
+                distortion_opt_params = self.datamanager.get_param_groups()[distortion_opt_param_group]
+                for i, param_name in enumerate(("scale", "shift")):
+                    if param_name not in self.config.datamanager.distortion_optimizer.mode:
+                        continue
+                    metrics_dict[f"distortion_opt_k1_{param_name}"] = distortion_opt_params[i].data[0]
+                    metrics_dict[f"distortion_opt_k2_{param_name}"] = distortion_opt_params[i].data[1]
+                    metrics_dict[f"distortion_opt_k3_{param_name}"] = distortion_opt_params[i].data[2]
+                    metrics_dict[f"distortion_opt_k4_{param_name}"] = distortion_opt_params[i].data[3]
+                    metrics_dict[f"distortion_opt_p1_{param_name}"] = distortion_opt_params[i].data[4]
+                    metrics_dict[f"distortion_opt_p2_{param_name}"] = distortion_opt_params[i].data[5]
+
         loss_dict = self.model.get_loss_dict(model_outputs, batch, metrics_dict)
 
         return model_outputs, loss_dict, metrics_dict
