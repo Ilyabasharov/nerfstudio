@@ -301,6 +301,7 @@ def expected_sin(x_means: torch.Tensor, x_vars: torch.Tensor) -> torch.Tensor:
 
     return torch.exp(-0.5 * x_vars) * torch.sin(x_means)
 
+
 @torch_compile(dynamic=True, mode="reduce-overhead", backend="eager")
 def intersect_aabb(
     origins: torch.Tensor,
@@ -429,6 +430,7 @@ def normalized_depth_scale_and_shift(
 
     return scale, shift
 
+
 @torch_compile(dynamic=True, mode="reduce-overhead", backend="eager")
 def power_fn(x: torch.Tensor, lam: float = -1.5, max_bound: float = 1e10) -> torch.Tensor:
     """Power transformation function from Eq. 4 in ZipNeRF paper."""
@@ -548,12 +550,16 @@ def reflect(viewdirs: torch.Tensor, normals: torch.Tensor) -> torch.Tensor:
 @torch_compile(dynamic=True, mode="reduce-overhead", backend="eager")
 def linear_to_srgb(
     linear: torch.Tensor,
-    eps: float = 1e-8,
 ) -> torch.Tensor:
     """Assumes `linear` is in [0, 1], see https://en.wikipedia.org/wiki/SRGB."""
-    srgb0 = 323 / 25 * linear
-    srgb1 = (211 * torch.maximum(eps, linear) ** (5 / 12) - 11) / 200
-    return torch.where(linear <= 0.0031308, srgb0, srgb1)
+    threshold = 0.0031308
+    rgb: torch.Tensor = torch.where(
+        linear > threshold,
+        1.055 * linear.clamp_min(threshold).pow(5 / 12) - 0.055,
+        12.92 * linear,
+    )
+
+    return rgb
 
 
 def blur_stepfun(x: Tensor, y: Tensor, r: float) -> Tuple[Tensor, Tensor]:

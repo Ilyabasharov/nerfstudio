@@ -41,7 +41,7 @@ class RefNerfactoModelConfig(NerfactoModelConfig):
     """Geo feature vector dim."""
     bottleneck_layer_width: int = 256
     """Bottleneck layer width."""
-    bottleneck_noise: float = 0.0
+    bottleneck_noise: float = 0.001
     """Std of bottleneck noise."""
     bottleneck_noise_steps: int = 10000
     """Steps of applying bottleneck noise."""

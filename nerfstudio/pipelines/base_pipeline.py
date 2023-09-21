@@ -121,7 +121,11 @@ class Pipeline(nn.Module):
         if is_ddp_model_state:
             model_state = {key[len("module.") :]: value for key, value in model_state.items()}
 
-        pipeline_state = {key: value for key, value in state_dict.items() if not key.startswith("_model.")}
+        pipeline_state = {
+            key: value
+            for key, value in state_dict.items()
+            if not key.startswith("_model.")
+        }
 
         try:
             self.model.load_state_dict(model_state, strict=True)
@@ -311,30 +315,28 @@ class VanillaPipeline(Pipeline):
         if self.config.datamanager.intrinsic_optimizer is not None:
             intrinsic_opt_param_group = self.config.datamanager.intrinsic_optimizer.param_group
             if intrinsic_opt_param_group in self.datamanager.get_param_groups():
-                # Report the camera optimization metrics
+                # Report the intrinsic optimization metrics
                 intrinsic_opt_params = self.datamanager.get_param_groups()[intrinsic_opt_param_group]
                 for i, param_name in enumerate(("scale", "shift")):
                     if param_name not in self.config.datamanager.intrinsic_optimizer.mode:
                         continue
-                    metrics_dict[f"intrinsic_opt_fx_{param_name}"] = intrinsic_opt_params[i].data[0]
-                    metrics_dict[f"intrinsic_opt_fy_{param_name}"] = intrinsic_opt_params[i].data[1]
-                    metrics_dict[f"intrinsic_opt_cx_{param_name}"] = intrinsic_opt_params[i].data[2]
-                    metrics_dict[f"intrinsic_opt_cy_{param_name}"] = intrinsic_opt_params[i].data[3]
+                    for j, cam_param_name in enumerate(("fx", "fy", "cx", "cy")):
+                        metrics_dict[
+                            f"intrinsic_opt_{cam_param_name}_{param_name}"
+                        ] = intrinsic_opt_params[i].data[j]
 
         if self.config.datamanager.distortion_optimizer is not None:
             distortion_opt_param_group = self.config.datamanager.distortion_optimizer.param_group
             if distortion_opt_param_group in self.datamanager.get_param_groups():
-                # Report the camera optimization metrics
+                # Report the distortion optimization metrics
                 distortion_opt_params = self.datamanager.get_param_groups()[distortion_opt_param_group]
                 for i, param_name in enumerate(("scale", "shift")):
                     if param_name not in self.config.datamanager.distortion_optimizer.mode:
                         continue
-                    metrics_dict[f"distortion_opt_k1_{param_name}"] = distortion_opt_params[i].data[0]
-                    metrics_dict[f"distortion_opt_k2_{param_name}"] = distortion_opt_params[i].data[1]
-                    metrics_dict[f"distortion_opt_k3_{param_name}"] = distortion_opt_params[i].data[2]
-                    metrics_dict[f"distortion_opt_k4_{param_name}"] = distortion_opt_params[i].data[3]
-                    metrics_dict[f"distortion_opt_p1_{param_name}"] = distortion_opt_params[i].data[4]
-                    metrics_dict[f"distortion_opt_p2_{param_name}"] = distortion_opt_params[i].data[5]
+                    for j, cam_param_name in enumerate(("k1", "k2", "k3", "k4", "p1", "p2")):
+                        metrics_dict[
+                            f"distortion_opt_{cam_param_name}_{param_name}"
+                        ] = distortion_opt_params[i].data[j]
 
         loss_dict = self.model.get_loss_dict(model_outputs, batch, metrics_dict)
 
@@ -476,7 +478,7 @@ class VanillaPipeline(Pipeline):
         """
         datamanager_params = self.datamanager.get_param_groups()
         model_params = self.model.get_param_groups()
-        
+
         assert not (model_params.keys() & datamanager_params.keys()), \
             "Param groups names are overlaping."
         return {**datamanager_params, **model_params}

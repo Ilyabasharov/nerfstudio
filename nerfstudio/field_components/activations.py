@@ -116,6 +116,9 @@ class Gaussian(nn.Module):
         """forward method"""
         return (-0.5 * input ** 2 / self.sigma ** 2).exp()
 
+    def extra_repr(self) -> str:
+        return f'sigma={self.sigma}'
+
 
 class Squareplus(nn.Module):
     """Squareplus activation presented https://arxiv.org/pdf/2112.11687.pdf.
@@ -139,6 +142,9 @@ class Squareplus(nn.Module):
         """Call forward and returns and processed tensor."""
         _input = input * self.beta
         return 1 / (2 * self.beta) * (_input + torch.sqrt(_input * _input + self.shift))
+    
+    def extra_repr(self) -> str:
+        return f'beta={self.beta}, shift={self.shift}'
 
 
 if TYPE_CHECKING:

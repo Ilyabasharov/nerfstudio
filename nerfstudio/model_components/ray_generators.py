@@ -70,6 +70,6 @@ class RayGenerator(nn.Module):
             coords=coords,
             camera_opt_to_camera=pose_opt_to_camera,
             intrinsics_opt_to_camera=self.intrinsic_optimizer,
-            distiortion_opt_to_camera=self.distortion_optimizer,
+            distortion_opt_to_camera=self.distortion_optimizer,
         )
         return ray_bundle

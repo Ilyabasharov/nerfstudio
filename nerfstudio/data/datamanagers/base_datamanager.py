@@ -118,11 +118,14 @@ class DataManagerConfig(InstantiateConfig):
     data: Optional[Path] = None
     """Source of data, may not be used by all models."""
     pose_optimizer: Optional[PoseOptimizerConfig] = None
-    """Specifies the camera pose optimizer used during training. Helpful if poses are noisy."""
+    """Specifies the camera pose optimizer used during training.
+    Helpful if poses are noisy."""
     intrinsic_optimizer: Optional[IntrinsicOptimizerConfig] = None
-    """Specifies the camera intrinsic optimizer used during training. Helpful if intrinsic are noisy."""
+    """Specifies the camera intrinsic optimizer used during training.
+    Helpful if intrinsic are noisy."""
     distortion_optimizer: Optional[DistortionOptimizerConfig] = None
-    """Specifies the camera distortion optimizer used during training. Helpful if distortion are noisy."""
+    """Specifies the camera distortion optimizer used during training.
+    Helpful if distortion are noisy."""
     masks_on_gpu: bool = False
     """Process masks on GPU for speed at the expense of memory, if True."""
     images_on_gpu: bool = False

@@ -264,8 +264,9 @@ class NerfactoField(Field):
         # from smaller internal (float16) parameters.
         density = trunc_exp(density_before_activation.to(positions))
         density = density * selector[..., None]
+
         return density, base_mlp_out
-    
+
     def _get_appearance_embedding(
         self,
         camera_indices: Int[Tensor, "*bs"],
@@ -290,7 +291,6 @@ class NerfactoField(Field):
             ) * multiplier
             
         return embedded_appearance, scale, shift
-
 
     def get_outputs(
         self,

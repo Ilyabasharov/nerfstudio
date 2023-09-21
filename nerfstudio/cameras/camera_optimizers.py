@@ -280,6 +280,7 @@ class DistortionOptimizer(IntrinsicOptimizer):
     ) -> Float[Tensor, "*batch_dist_params 6"]:
         """Distortion correction
         Args:
+            indices: used for stole shape of input rays
             distortion_params: the distortion parameters [k1, k2, k3, k4, p1, p2].
                 Can be None.
         Returns:
@@ -290,7 +291,10 @@ class DistortionOptimizer(IntrinsicOptimizer):
         if self.config.mode == "off":
             pass
         elif "shift" in self.config.mode:
-            corrected_distortion = getattr(self, f"{self.config.param_group}_adjustment_shift")[None].expand(indices.shape)
+            corrected_distortion = getattr(
+                self,
+                f"{self.config.param_group}_adjustment_shift",
+            ).expand(indices.shape[0], self.num_params)
             if distortion_params is not None:
                 corrected_distortion = distortion_params + corrected_distortion
         else:

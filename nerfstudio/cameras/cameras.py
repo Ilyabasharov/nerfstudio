@@ -34,6 +34,7 @@ from nerfstudio.cameras import camera_utils
 from nerfstudio.cameras.rays import RayBundle
 from nerfstudio.data.scene_box import SceneBox
 from nerfstudio.utils.tensor_dataclass import TensorDataclass
+from nerfstudio.cameras.camera_optimizers import IntrinsicOptimizer, DistortionOptimizer
 
 TORCH_DEVICE = Union[torch.device, str]
 
@@ -179,7 +180,9 @@ class Cameras(TensorDataclass):
     def _init_get_camera_type(
         self,
         camera_type: Union[
-            Int[Tensor, "*batch_cam_types 1"], Int[Tensor, "*batch_cam_types"], int, List[CameraType], CameraType
+            Int[Tensor, "*batch_cam_types 1"],
+            Int[Tensor, "*batch_cam_types"],
+            int, List[CameraType], CameraType,
         ],
     ) -> Int[Tensor, "*num_cameras 1"]:
         """
@@ -319,8 +322,8 @@ class Cameras(TensorDataclass):
         camera_indices: Union[Int[Tensor, "*num_rays num_cameras_batch_dims"], int],
         coords: Optional[Float[Tensor, "*num_rays 2"]] = None,
         camera_opt_to_camera: Optional[Float[Tensor, "*num_rays 3 4"]] = None,
-        intrinsics_opt_to_camera: Optional[torch.nn.Module] = None,
-        distortion_opt_to_camera: Optional[torch.nn.Module] = None,
+        intrinsics_opt_to_camera: Optional[IntrinsicOptimizer] = None,
+        distortion_opt_to_camera: Optional[DistortionOptimizer] = None,
         keep_shape: Optional[bool] = None,
         disable_distortion: bool = False,
         aabb_box: Optional[SceneBox] = None,
@@ -333,7 +336,7 @@ class Cameras(TensorDataclass):
             - coords: (num_rays:..., 2)
             - camera_opt_to_camera: (num_rays:..., 3, 4) or None
             - intrinsics_opt_to_camera: nn.Module or None
-            - distiortion_opt_to_camera: nn.Module or None
+            - distortion_opt_to_camera: nn.Module or None
 
         Read the docstring for _generate_rays_from_coords for more information on how we generate the rays
         after we have standardized the arguments.
@@ -362,7 +365,8 @@ class Cameras(TensorDataclass):
             camera_indices: Camera indices of the flattened cameras object to generate rays for.
             coords: Coordinates of the pixels to generate rays for. If None, the full image will be rendered.
             camera_opt_to_camera: Optional transform for the camera to world matrices.
-            distiortion_opt_to_camera: Optional delta for the distortion parameters.
+            intrinsics_opt_to_camera: Optional model for intrinsics delta correction.
+            distortion_opt_to_camera: Optional model for distortion delta correction.
             keep_shape: If None, then we default to the regular behavior of flattening if cameras is jagged, otherwise
                 keeping dimensions. If False, we flatten at the end. If True, then we keep the shape of the
                 camera_indices and coords tensors (if we can).
@@ -452,11 +456,11 @@ class Cameras(TensorDataclass):
         # raybundle.shape == (num_rays) when done
 
         raybundle = cameras._generate_rays_from_coords(
-            camera_indices,
-            coords,
-            camera_opt_to_camera,
-            intrinsics_opt_to_camera,
-            distortion_opt_to_camera,
+            camera_indices=camera_indices,
+            coords=coords,
+            camera_opt_to_camera=camera_opt_to_camera,
+            intrinsic_opt_to_camera=intrinsics_opt_to_camera,
+            distortion_opt_to_camera=distortion_opt_to_camera,
             disable_distortion=disable_distortion,
         )
 
@@ -495,8 +499,8 @@ class Cameras(TensorDataclass):
         camera_indices: Int[Tensor, "*num_rays num_cameras_batch_dims"],
         coords: Float[Tensor, "*num_rays 2"],
         camera_opt_to_camera: Optional[Float[Tensor, "*num_rays 3 4"]] = None,
-        intrinsic_opt_to_camera: Optional[torch.nn.Module] = None,
-        distortion_opt_to_camera: Optional[torch.nn.Module] = None,
+        intrinsic_opt_to_camera: Optional[IntrinsicOptimizer] = None,
+        distortion_opt_to_camera: Optional[DistortionOptimizer] = None,
         disable_distortion: bool = False,
     ) -> RayBundle:
         """Generates rays for the given camera indices and coords where self isn't jagged
@@ -609,7 +613,7 @@ class Cameras(TensorDataclass):
             + str(cy.shape)
         )
 
-        if intrinsic_opt_to_camera is not None:
+        if intrinsic_opt_to_camera is not None and intrinsic_opt_to_camera.config.mode != "off":
             fx, fy, cx, cy = intrinsic_opt_to_camera(fx, fy, cx, cy)
 
         # Get our image coordinates and image coordinates offset by 1 (offsets used for dx, dy calculations)
@@ -630,14 +634,12 @@ class Cameras(TensorDataclass):
         # Undistorts our images according to our distortion parameters
         if not disable_distortion:
             distortion_params = None
-            if distortion_opt_to_camera is not None:
+            if self.distortion_params is not None:
+                distortion_params = self.distortion_params[true_indices]
+            if distortion_opt_to_camera is not None and distortion_opt_to_camera.config.mode != 'off':
                 distortion_params = distortion_opt_to_camera(
                     indices=camera_indices,
-                    distortion_params=(
-                        self.distortion_params[true_indices]
-                        if self.distortion_params is not None
-                        else None
-                    )
+                    distortion_params=distortion_params,
                 )
 
             # Do not apply distortion for equirectangular images
@@ -875,6 +877,9 @@ class Cameras(TensorDataclass):
 
         times = self.times[camera_indices, 0] if self.times is not None else None
 
+        if origins.isnan().any() or directions.isnan().any():
+            import ipdb; ipdb.set_trace()
+
         return RayBundle(
             origins=origins,
             directions=directions,
@@ -885,7 +890,10 @@ class Cameras(TensorDataclass):
         )
 
     def to_json(
-        self, camera_idx: int, image: Optional[Float[Tensor, "height width 2"]] = None, max_size: Optional[int] = None
+        self,
+        camera_idx: int,
+        image: Optional[Float[Tensor, "height width 2"]] = None,
+        max_size: Optional[int] = None,
     ) -> Dict:
         """Convert a camera to a json dictionary.
 
@@ -937,7 +945,13 @@ class Cameras(TensorDataclass):
         return K
 
     def rescale_output_resolution(
-        self, scaling_factor: Union[Shaped[Tensor, "*num_cameras"], Shaped[Tensor, "*num_cameras 1"], float, int]
+        self,
+        scaling_factor: Union[
+            Shaped[Tensor, "*num_cameras"],
+            Shaped[Tensor, "*num_cameras 1"],
+            float,
+            int,
+        ]
     ) -> None:
         """Rescale the output resolution of the cameras.
 

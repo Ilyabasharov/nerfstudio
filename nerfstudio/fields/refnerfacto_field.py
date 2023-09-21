@@ -29,9 +29,10 @@ from nerfstudio.field_components.mlp import MLP
 from nerfstudio.field_components.spatial_distortions import SpatialDistortion
 from nerfstudio.fields.nerfacto_field import NerfactoField
 from nerfstudio.cameras.bundle_adjustment import HashBundleAdjustment
-from nerfstudio.field_components.encodings import IDEncoding, NeRFEncoding
+from nerfstudio.field_components.encodings import IDEncoding
 from nerfstudio.field_components.field_heads import FieldHeadNames
 from nerfstudio.utils.math import reflect, linear_to_srgb
+
 
 REF_CONSTANT = math.log(3.0)
 EPS = 1e-8
@@ -177,20 +178,12 @@ class RefNerfactoField(NerfactoField):
 
         in_dim_mlps = self.geo_feat_dim + self.position_encoding.get_out_dim()
 
-        self.bottleneck_encoding = NeRFEncoding(
-            in_dim=self.geo_feat_dim,
-            min_freq_exp=0,
-            max_freq_exp=2 - 1,
-            num_frequencies=2,
-            implementation=implementation,
-        )
-
         self.mlp_pred_bottleneck = MLP(
-            in_dim=self.bottleneck_encoding.get_out_dim() + self.position_encoding.get_out_dim(),
+            in_dim=self.geo_feat_dim + self.position_encoding.get_out_dim(),
             num_layers=3,
             layer_width=bottleneck_layer_width,
             out_dim=bottleneck_width,
-            activation=nn.LeakyReLU(),
+            activation=nn.ReLU(),
             out_activation=None,
             implementation=implementation,
         )
@@ -202,7 +195,7 @@ class RefNerfactoField(NerfactoField):
                 num_layers=3,
                 layer_width=256,
                 out_dim=1,
-                activation=nn.LeakyReLU(),
+                activation=nn.ReLU(),
                 out_activation=None,
                 implementation=implementation,
             )
@@ -213,7 +206,7 @@ class RefNerfactoField(NerfactoField):
                 num_layers=3,
                 layer_width=64,
                 out_dim=3,
-                activation=nn.LeakyReLU(),
+                activation=nn.ReLU(),
                 out_activation=None,
                 implementation=implementation,
             )
@@ -224,7 +217,7 @@ class RefNerfactoField(NerfactoField):
                 num_layers=3,
                 layer_width=64,
                 out_dim=3,
-                activation=nn.LeakyReLU(),
+                activation=nn.ReLU(),
                 out_activation=nn.Sigmoid(),
                 implementation=implementation,
             )
@@ -313,16 +306,16 @@ class RefNerfactoField(NerfactoField):
         if self.use_pred_normals:
             pred_normals = self.field_head_pred_normals(
                 self.mlp_pred_normals(inputs_mlps)
-                .to(directions_flat)
                 .view(*outputs_shape, -1)
+                .to(directions_flat)
             )
             outputs[FieldHeadNames.PRED_NORMALS] = pred_normals
 
         # specular tint
         if self.use_pred_specular_tint:
             pred_specular_tint = self.mlp_pred_specular_tint(
-                inputs_mlps,
-            ).view(*outputs_shape, -1).to(directions_flat)
+                inputs_mlps
+            ).view(*outputs_shape, -1)
             outputs[FieldHeadNames.SPECULAR_TINT] = pred_specular_tint
 
         # roughness
@@ -332,36 +325,28 @@ class RefNerfactoField(NerfactoField):
             # from smaller internal (float16) parameters.
             pred_roughness = torch.nn.functional.softplus(
                 self.mlp_pred_raw_roughness(
-                    inputs_mlps,
+                    inputs_mlps
                 ).view(*outputs_shape, -1)
                 + self.roughness_bias
-            ).to(directions_flat)
+            )
             outputs[FieldHeadNames.ROUGHNESS] = pred_roughness
 
         # diffuse color
         if self.use_pred_diffuse_color:
             pred_diffuse_color = torch.nn.functional.sigmoid(
                 self.mlp_pred_raw_diffuse_color(
-                    inputs_mlps,
+                    inputs_mlps
                 ).view(*outputs_shape, -1)
                 - REF_CONSTANT
-            ).to(directions_flat)
+            )
             outputs[FieldHeadNames.DIFFUSE_COLOR] = pred_diffuse_color
 
         # bottleneck
-        inputs_mlps = torch.cat(
-            [
-                positions_encoded_flat,
-                self.bottleneck_encoding(
-                    density_embedding.view(-1, self.geo_feat_dim),
-                ),
-            ],
-            dim=-1,
+        pred_bottleneck = self.mlp_pred_bottleneck(
+            inputs_mlps
         )
-
-        pred_bottleneck = self.mlp_pred_bottleneck(inputs_mlps)
         if self.bottleneck_noise > 0:
-            pred_bottleneck = pred_bottleneck * torch.normal(
+            pred_bottleneck = pred_bottleneck + torch.normal(
                 mean=0,
                 std=self.bottleneck_noise,
                 size=pred_bottleneck.shape,
