@@ -520,7 +520,7 @@ class Trainer:
         # one eval image
         if step_check(step, self.config.steps_per_eval_image):
             with TimeWriter(writer, EventName.TEST_RAYS_PER_SEC, write=False) as test_t:
-                metrics_dict, images_dict = self.pipeline.get_eval_image_metrics_and_images(step=step)
+                metrics_dict, images_dict, figures_dict = self.pipeline.get_eval_image_metrics_and_images(step=step)
             writer.put_time(
                 name=EventName.TEST_RAYS_PER_SEC,
                 duration=metrics_dict["num_rays"] / test_t.duration,
@@ -531,6 +531,9 @@ class Trainer:
             group = "Eval Images"
             for image_name, image in images_dict.items():
                 writer.put_image(name=group + "/" + image_name, image=image, step=step)
+
+            for figure_name, figure in figures_dict.items():
+                writer.put_figure(name=group + "/" + figure_name, figure=figure, step=step)
 
         # all eval images
         if step_check(step, self.config.steps_per_eval_all_images):

@@ -288,6 +288,7 @@ def urban_radiance_field_depth_loss(
     sigma: Float[Tensor, "0"],
 ) -> Float[Tensor, "*batch 1"]:
     """Lidar losses from Urban Radiance Fields (Rematas et al., 2022).
+    https://urban-radiance-fields.github.io/images/go_urf.pdf
 
     Args:
         weights: Weights predicted for each sample.
@@ -304,16 +305,27 @@ def urban_radiance_field_depth_loss(
     expected_depth_loss = (termination_depth - predicted_depth) ** 2
 
     # Line of sight losses
-    target_distribution = torch.distributions.normal.Normal(0.0, sigma / URF_SIGMA_SCALE_FACTOR)
+    target_distribution = torch.distributions.normal.Normal(
+        scale=termination_depth, loc=sigma / URF_SIGMA_SCALE_FACTOR,
+    ).log_prob(steps).exp()
+
+    # Fix error when Normal distibution is not sum up to one
+    target_distribution /= target_distribution.sum(-2, keepdim=True)
+
     termination_depth = termination_depth[:, None]
     line_of_sight_loss_near_mask = torch.logical_and(
-        steps <= termination_depth + sigma, steps >= termination_depth - sigma
+        steps <= termination_depth + sigma,
+        steps >= termination_depth - sigma,
     )
-    line_of_sight_loss_near = (weights - torch.exp(target_distribution.log_prob(steps - termination_depth))) ** 2
+
+    # Near step, see eq. 16
+    line_of_sight_loss_near = (weights - target_distribution) ** 2
     line_of_sight_loss_near = (line_of_sight_loss_near_mask * line_of_sight_loss_near).sum(-2)
-    line_of_sight_loss_empty_mask = steps < termination_depth - sigma
-    line_of_sight_loss_empty = (line_of_sight_loss_empty_mask * weights**2).sum(-2)
-    line_of_sight_loss = line_of_sight_loss_near + line_of_sight_loss_empty
+
+    # Empty & dist step, see eq. 17 & 18
+    line_of_sight_loss_empty_dist_mask = torch.logical_not(line_of_sight_loss_near_mask)
+    line_of_sight_loss_empty_dist = (line_of_sight_loss_empty_dist_mask * weights**2).sum(-2)
+    line_of_sight_loss = line_of_sight_loss_near + line_of_sight_loss_empty_dist
 
     loss = (expected_depth_loss + line_of_sight_loss) * depth_mask
     return torch.mean(loss)

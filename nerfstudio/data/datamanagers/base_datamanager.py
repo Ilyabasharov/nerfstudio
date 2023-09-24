@@ -441,7 +441,7 @@ class VanillaDataManager(DataManager, Generic[TDataset]):
         """Returns the dataset type passed as the generic argument"""
         default: Type[TDataset] = cast(TDataset, TDataset.__default__)  # type: ignore
         orig_class: Type[VanillaDataManager] = get_orig_class(self, default=None)  # type: ignore
-        if type(self) is VanillaDataManager and orig_class is None:
+        if isinstance(self, VanillaDataManager) and orig_class is None:
             return default
         if orig_class is not None and get_origin(orig_class) is VanillaDataManager:
             return get_args(orig_class)[0]
@@ -477,7 +477,7 @@ class VanillaDataManager(DataManager, Generic[TDataset]):
 
     def _get_pixel_sampler(self, dataset: TDataset, num_rays_per_batch: int) -> PixelSampler:
         """Infer pixel sampler to use."""
-        if self.config.patch_size > 1 and type(self.config.pixel_sampler) is PixelSamplerConfig:
+        if self.config.patch_size > 1 and isinstance(self.config.pixel_sampler, PixelSamplerConfig):
             return PatchPixelSamplerConfig().setup(
                 patch_size=self.config.patch_size, num_rays_per_batch=num_rays_per_batch
             )

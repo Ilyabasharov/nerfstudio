@@ -376,13 +376,13 @@ class VanillaPipeline(Pipeline):
         self.eval()
         image_idx, camera_ray_bundle, batch = self.datamanager.next_eval_image(step)
         outputs = self.model.get_outputs_for_camera_ray_bundle(camera_ray_bundle)
-        metrics_dict, images_dict = self.model.get_image_metrics_and_images(outputs, batch)
+        metrics_dict, images_dict, figures_dict = self.model.get_image_metrics_and_images(outputs, batch)
         assert "image_idx" not in metrics_dict
         metrics_dict["image_idx"] = image_idx
         assert "num_rays" not in metrics_dict
         metrics_dict["num_rays"] = len(camera_ray_bundle)
         self.train()
-        return metrics_dict, images_dict
+        return metrics_dict, images_dict, figures_dict
 
     @profiler.time_function
     def get_average_eval_image_metrics(
@@ -416,7 +416,7 @@ class VanillaPipeline(Pipeline):
                 height, width = camera_ray_bundle.shape
                 num_rays = height * width
                 outputs = self.model.get_outputs_for_camera_ray_bundle(camera_ray_bundle)
-                metrics_dict, images_dict = self.model.get_image_metrics_and_images(outputs, batch)
+                metrics_dict, images_dict, _ = self.model.get_image_metrics_and_images(outputs, batch)
 
                 if output_path is not None:
                     camera_indices = camera_ray_bundle.camera_indices

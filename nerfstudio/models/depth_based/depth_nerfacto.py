@@ -23,6 +23,7 @@ from typing import Dict, Tuple, Type, List
 
 import torch
 import numpy as np
+from matplotlib.figure import Figure
 
 from nerfstudio.cameras.rays import RayBundle
 from nerfstudio.model_components import losses
@@ -171,9 +172,13 @@ class DepthNerfactoModel(NerfactoModel):
 
     def get_image_metrics_and_images(
         self, outputs: Dict[str, torch.Tensor], batch: Dict[str, torch.Tensor]
-    ) -> Tuple[Dict[str, float], Dict[str, torch.Tensor]]:
+    ) -> Tuple[
+        Dict[str, float],
+        Dict[str, torch.Tensor],
+        Dict[str, List[Figure]],
+    ]:
         """Appends ground truth depth to the depth image."""
-        metrics, images = super().get_image_metrics_and_images(outputs, batch)
+        metrics, images, figures = super().get_image_metrics_and_images(outputs, batch)
 
         depths_show = []
         near_plane, far_plane = None, None
@@ -192,7 +197,7 @@ class DepthNerfactoModel(NerfactoModel):
             depths_show.append(colormaps.apply_depth_colormap(ranking_depth))
 
         predicted_depth_colormap = colormaps.apply_depth_colormap(
-            outputs[f"prop_depth_{self.config.num_proposal_iterations + 1}"],
+            outputs[f"prop_depth_{self.config.num_proposal_iterations}"],
             accumulation=outputs["accumulation"],
             near_plane=near_plane,
             far_plane=far_plane,
@@ -207,7 +212,7 @@ class DepthNerfactoModel(NerfactoModel):
                 termination_depth[depth_mask]
             ).cpu().item()
 
-        return metrics, images
+        return metrics, images, figures
 
     def _set_depth_sigma(self, step: int) -> None:
         """Sets up ranking loss multiplier."""

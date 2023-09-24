@@ -877,9 +877,6 @@ class Cameras(TensorDataclass):
 
         times = self.times[camera_indices, 0] if self.times is not None else None
 
-        if origins.isnan().any() or directions.isnan().any():
-            import ipdb; ipdb.set_trace()
-
         return RayBundle(
             origins=origins,
             directions=directions,

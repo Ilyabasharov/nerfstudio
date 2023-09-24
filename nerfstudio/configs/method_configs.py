@@ -108,7 +108,7 @@ method_configs["nerfacto"] = TrainerConfig(
             eval_num_rays_per_batch=4096,
             pose_optimizer=PoseOptimizerConfig(
                 mode="SO3xR3",
-                optimizer=AdamOptimizerConfig(lr=6e-4, eps=1e-8, weight_decay=1e-2),
+                optimizer=RAdamOptimizerConfig(lr=6e-4, eps=1e-8, weight_decay=1e-2),
                 scheduler=ExponentialDecaySchedulerConfig(lr_final=6e-6, max_steps=200000),
             ),
         ),
@@ -116,11 +116,11 @@ method_configs["nerfacto"] = TrainerConfig(
     ),
     optimizers={
         "proposal_networks": {
-            "optimizer": AdamOptimizerConfig(lr=1e-2, eps=1e-15),
+            "optimizer": RAdamOptimizerConfig(lr=1e-2, eps=1e-15),
             "scheduler": ExponentialDecaySchedulerConfig(lr_final=0.0001, max_steps=200000),
         },
         "fields": {
-            "optimizer": AdamOptimizerConfig(lr=1e-2, eps=1e-15),
+            "optimizer": RAdamOptimizerConfig(lr=1e-2, eps=1e-15),
             "scheduler": ExponentialDecaySchedulerConfig(lr_final=0.0001, max_steps=200000),
         },
     },
@@ -243,11 +243,10 @@ method_configs["depth-nerfacto"] = TrainerConfig(
             ],
             hidden_dim=256,
             hidden_dim_color=256,
-            appearance_embed_dim=32,
+            appearance_embed_dim=128,
             max_res=8192,
             proposal_weights_anneal_max_num_iters=5000,
             log2_hashmap_size=21,
-            use_bundle_adjust=True,
             depth_ranking_loss_mult=1.5,
         ),
     ),

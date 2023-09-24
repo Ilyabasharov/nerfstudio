@@ -29,6 +29,7 @@ import wandb
 from jaxtyping import Float
 from torch import Tensor
 from torch.utils.tensorboard import SummaryWriter
+from matplotlib.figure import Figure
 
 from nerfstudio.configs import base_config as cfg
 from nerfstudio.utils.decorators import check_main_thread, decorate_all
@@ -64,6 +65,7 @@ class EventType(enum.Enum):
 
     IMAGE = "write_image"
     SCALAR = "write_scalar"
+    FIGURE = "write_figure"
     DICT = "write_scalar_dict"
     CONFIG = "write_config"
 
@@ -95,6 +97,21 @@ def put_scalar(name: str, scalar: Any, step: int):
         name = name.value
 
     EVENT_STORAGE.append({"name": name, "write_type": EventType.SCALAR, "event": scalar, "step": step})
+
+
+@check_main_thread
+def put_figure(name: str, figure: Union[List[Figure], Figure], step: int):
+    """Setter function to place figures into the queue to be written out
+
+    Args:
+        name: name of scalar
+        figure: matplotlib figure or list of figures
+        step: step associated with scalar
+    """
+    if isinstance(name, EventName):
+        name = name.value
+
+    EVENT_STORAGE.append({"name": name, "write_type": EventType.FIGURE, "event": figure, "step": step})
 
 
 @check_main_thread
@@ -336,6 +353,9 @@ class TensorboardWriter(Writer):
 
     def write_scalar(self, name: str, scalar: Union[float, torch.Tensor], step: int) -> None:
         self.tb_writer.add_scalar(name, scalar, step)
+
+    def write_figure(self, name: str, figure: Union[Figure, List[Figure]], step: int) -> None:
+        self.tb_writer.add_figure(name, figure, step)
 
     def write_config(self, name: str, config_dict: Dict[str, Any], step: int):
         """Function that writes out the config to tensorboard

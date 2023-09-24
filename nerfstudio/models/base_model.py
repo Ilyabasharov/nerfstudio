@@ -26,6 +26,7 @@ from typing import Any, Dict, List, Optional, Tuple, Type, Union
 import torch
 from torch import nn
 from torch.nn import Parameter
+from matplotlib.figure import Figure
 
 from nerfstudio.cameras.rays import RayBundle
 from nerfstudio.configs.base_config import InstantiateConfig
@@ -41,17 +42,21 @@ class ModelConfig(InstantiateConfig):
     """Configuration for model instantiation"""
 
     _target: Type = field(default_factory=lambda: Model)
-    """target class to instantiate"""
+    """Target class to instantiate"""
     enable_collider: bool = True
     """Whether to create a scene collider to filter rays."""
     collider_params: Optional[Dict[str, float]] = to_immutable_dict({"near_plane": 2.0, "far_plane": 6.0})
-    """parameters to instantiate scene collider with"""
+    """Parameters to instantiate scene collider with"""
     loss_coefficients: Dict[str, float] = to_immutable_dict({"rgb_loss_coarse": 1.0, "rgb_loss_fine": 1.0})
-    """parameters to instantiate density field with"""
+    """Parameters to instantiate density field with"""
     eval_num_rays_per_chunk: int = 4096
-    """specifies number of rays per chunk during eval"""
+    """Specifies number of rays per chunk during eval"""
     prompt: Optional[str] = None
     """A prompt to be used in text to NeRF models"""
+    visualize_weights_distribution: bool = False
+    """Whether to visualize distribution of model weights"""
+    num_rays_to_visualize: int = 5
+    """How many rays will be showed on distibution plot"""
 
 
 class Model(nn.Module):
@@ -85,6 +90,15 @@ class Model(nn.Module):
         self.callbacks = None
         # to keep track of which device the nn.Module is on
         self.device_indicator_param = nn.Parameter(torch.empty(0))
+        self.vis_weights_dist = False
+
+        if (
+            self.config.visualize_weights_distribution
+            and self.config.num_rays_to_visualize > 0
+        ):
+            # keep indexes static for using less memery
+            self.visualize_pixel_indexes = torch.rand((self.config.num_rays_to_visualize, 1))
+            self.vis_weights_dist = True
 
     @property
     def device(self):
@@ -173,19 +187,62 @@ class Model(nn.Module):
         image_height, image_width = camera_ray_bundle.origins.shape[:2]
         num_rays = len(camera_ray_bundle)
         outputs_lists = defaultdict(list)
+        flattened_camera_ray_bundle = camera_ray_bundle.flatten()
+
+        eval_and_vis_weights_dist = self.eval and self.vis_weights_dist
+
+        if eval_and_vis_weights_dist:
+            # tf uniform dist to [0, w * h - 1]
+            vis_indexes = (
+                self.visualize_pixel_indexes
+                .mul(image_height * image_width - 1)
+                .floor()
+                .long()
+            )
+            vis_outputs = defaultdict(list)
+
         for i in range(0, num_rays, num_rays_per_chunk):
             start_idx = i
             end_idx = i + num_rays_per_chunk
-            ray_bundle = camera_ray_bundle.get_row_major_sliced_ray_bundle(start_idx, end_idx)
+            ray_bundle = flattened_camera_ray_bundle[start_idx:end_idx]
             outputs = self.forward(ray_bundle=ray_bundle)
-            for output_name, output in outputs.items():  # type: ignore
-                if not torch.is_tensor(output):
-                    # TODO: handle lists of tensors as well
-                    continue
-                outputs_lists[output_name].append(output)
+            for output_name, output in outputs.items():
+                if torch.is_tensor(output):
+                    outputs_lists[output_name].append(output)
+                elif (
+                    isinstance(output, List) and
+                    all(map(torch.is_tensor, output))
+                ):
+                    if eval_and_vis_weights_dist:
+                        if output_name not in vis_outputs:
+                            vis_outputs[output_name] = [[] for _ in output]
+
+                        vis_indexes_mask = torch.logical_and(
+                            vis_indexes >= start_idx,
+                            vis_indexes < end_idx,
+                        )
+
+                        for i, output_instance in enumerate(output):
+                            vis_outputs[output_name][i].append(
+                                output_instance[
+                                    vis_indexes[vis_indexes_mask] - start_idx
+                                ]
+                            )
+
         outputs = {}
         for output_name, outputs_list in outputs_lists.items():
-            outputs[output_name] = torch.cat(outputs_list).view(image_height, image_width, -1)  # type: ignore
+            outputs[output_name] = (
+                torch.cat(outputs_list)
+                .view(image_height, image_width, -1)
+            )
+
+        if eval_and_vis_weights_dist:
+            for output_name, outputs_list in vis_outputs.items():
+                outputs[output_name] = [
+                    torch.cat(output_instance)
+                    for output_instance in outputs_list
+                ]
+
         return outputs
 
     def get_rgba_image(self, outputs: Dict[str, torch.Tensor], output_name: str = "rgb") -> torch.Tensor:
@@ -215,7 +272,11 @@ class Model(nn.Module):
     @abstractmethod
     def get_image_metrics_and_images(
         self, outputs: Dict[str, torch.Tensor], batch: Dict[str, torch.Tensor]
-    ) -> Tuple[Dict[str, float], Dict[str, torch.Tensor]]:
+    ) -> Tuple[
+        Dict[str, float],
+        Dict[str, torch.Tensor],
+        Dict[str, List[Figure]],
+    ]:
         """Writes the test image outputs.
         TODO: This shouldn't return a loss
 

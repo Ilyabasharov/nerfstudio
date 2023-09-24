@@ -19,14 +19,16 @@ NeRF implementation that combines many recent advancements.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Literal, Tuple, Type, Optional
+from typing import Dict, List, Literal, Tuple, Type, Optional, Union
 
 import numpy as np
 import torch
+from torch import Tensor
 from torch.nn import Parameter
 from torchmetrics.functional import structural_similarity_index_measure
 from torchmetrics.image import PeakSignalNoiseRatio
 from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
+from matplotlib.figure import Figure
 
 from nerfstudio.cameras.rays import RayBundle
 from nerfstudio.engine.callbacks import (
@@ -54,7 +56,7 @@ from nerfstudio.model_components.scene_colliders import NearFarCollider
 from nerfstudio.model_components.shaders import NormalsShader
 from nerfstudio.models.base_model import Model, ModelConfig
 from nerfstudio.cameras.bundle_adjustment import BundleAdjustmentType
-from nerfstudio.utils import colormaps
+from nerfstudio.utils import colormaps, matplotlib_utis
 
 
 @dataclass
@@ -372,7 +374,7 @@ class NerfactoModel(Model):
         outputs = {
             "rgb": rgb,
             "accumulation": accumulation,
-            f"prop_depth_{self.config.num_proposal_iterations + 1}": depth,
+            f"prop_depth_{self.config.num_proposal_iterations}": depth,
         }
 
         if FieldHeadNames.ROUGHNESS in field_outputs:
@@ -429,6 +431,23 @@ class NerfactoModel(Model):
                         field_outputs[FieldHeadNames.PRED_NORMALS],
                     )
 
+        elif (
+            self.config.visualize_weights_distribution
+            and self.config.num_rays_to_visualize > 0
+        ):
+            outputs["weights_list"] = [weights_prop.cpu() for weights_prop in weights_list]
+            outputs["ray_steps_list"] = [
+                (ray_samples_prop.frustums.starts + ray_samples_prop.frustums.ends)
+                .div(2.0)
+                .cpu()
+                for ray_samples_prop in ray_samples_list
+            ]
+            outputs["ray_length_list"] = [
+                (ray_samples_prop.frustums.starts - ray_samples_prop.frustums.ends)
+                .cpu()
+                for ray_samples_prop in ray_samples_list
+            ]
+
         for i in range(self.config.num_proposal_iterations):
             outputs[f"prop_depth_{i}"] = self.renderer_depth(
                 weights=weights_list[i],
@@ -482,15 +501,40 @@ class NerfactoModel(Model):
                     )
         return loss_dict
 
+    def _visualise_weights(
+        self,
+        outputs: Dict[str, Union[Tensor, List[Tensor]]],
+    ) -> Dict[str, List[Figure]]:
+        figures_dict = {}
+        if (
+            self.config.visualize_weights_distribution
+            and self.config.num_rays_to_visualize > 0
+        ):
+            figures_dict["weights_dist"] = [
+                matplotlib_utis.plot_weights_distribution_multiprop(
+                    weights=outputs["weights_list"],
+                    steps=outputs["ray_steps_list"],
+                    i=i,
+                )
+                for i in range(self.config.num_rays_to_visualize)
+            ]
+        return figures_dict
+
     def get_image_metrics_and_images(
-        self, outputs: Dict[str, torch.Tensor], batch: Dict[str, torch.Tensor]
-    ) -> Tuple[Dict[str, float], Dict[str, torch.Tensor]]:
+        self,
+        outputs: Dict[str, torch.Tensor],
+        batch: Dict[str, torch.Tensor],
+    ) -> Tuple[
+        Dict[str, float],
+        Dict[str, torch.Tensor],
+        Dict[str, List[Figure]],
+    ]:
         gt_rgb = batch["image"].to(self.device)
         predicted_rgb = outputs["rgb"]  # Blended with background (black if random background)
         gt_rgb = self.renderer_rgb.blend_background(gt_rgb)
         acc = colormaps.apply_colormap(outputs["accumulation"])
         depth = colormaps.apply_depth_colormap(
-            outputs[f"prop_depth_{self.config.num_proposal_iterations + 1}"],
+            outputs[f"prop_depth_{self.config.num_proposal_iterations}"],
             accumulation=outputs["accumulation"],
         )
 
@@ -555,4 +599,6 @@ class NerfactoModel(Model):
             )
             images_dict[key] = prop_depth_i
 
-        return metrics_dict, images_dict
+        figures_dict = self._visualise_weights(outputs)
+
+        return metrics_dict, images_dict, figures_dict
