@@ -19,9 +19,10 @@ Nerfacto augmented with depth supervision.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, Tuple, Type, List
+from typing import Dict, Tuple, Type, List, Union
 
 import torch
+from torch import Tensor
 import numpy as np
 from matplotlib.figure import Figure
 
@@ -34,7 +35,7 @@ from nerfstudio.engine.callbacks import (
     TrainingCallbackAttributes,
     TrainingCallbackLocation,
 )
-from nerfstudio.utils import colormaps
+from nerfstudio.utils import colormaps, matplotlib_utis
 
 
 @dataclass
@@ -42,7 +43,7 @@ class DepthNerfactoModelConfig(NerfactoModelConfig):
     """Additional parameters for depth supervision."""
 
     _target: Type = field(default_factory=lambda: DepthNerfactoModel)
-    depth_loss_mult: float = 1e-1
+    depth_loss_mult: float = 1e-2
     """Lambda of the depth loss."""
     depth_ranking_loss_mult: float = 1.0
     """Lambda of the depth loss."""
@@ -50,13 +51,13 @@ class DepthNerfactoModelConfig(NerfactoModelConfig):
     """Whether input depth maps are Euclidean distances (or z-distances)."""
     depth_sigma: float = 0.01
     """Uncertainty around depth values in meters (defaults to 1cm)."""
-    should_decay_sigma: bool = False
+    should_decay_sigma: bool = True
     """Whether to exponentially decay sigma."""
     starting_depth_sigma: float = 0.2
     """Starting uncertainty around depth values in meters (defaults to 0.2m)."""
-    sigma_decay_rate: float = 0.99985
+    sigma_decay_rate: float = 0.99995
     """Rate of exponential decay."""
-    use_depth_loss: bool = False
+    use_depth_loss: bool = True
     """Whether to use depth ranking loss for absolute depth."""
     depth_loss_type: DepthLossType = DepthLossType.URF
     """Depth loss type."""
@@ -104,11 +105,18 @@ class DepthNerfactoModel(NerfactoModel):
         metrics_dict = super().get_metrics_dict(outputs, batch)
         if self.training:
             if self.use_depth_ranking_loss:
+                assert "depth_ranking_image" in batch, (
+                    "Check dataset or turn off `depth_ranking_loss`")
                 metrics_dict["depth_ranking_loss"] = 0.0
+                metrics_dict["ranking_loss_multiplier"] = self.ranking_loss_multiplier
                 ranking_depth = batch["depth_ranking_image"].to(self.device)
             if self.config.use_depth_loss:
+                assert "depth_image" in batch, (
+                    "Check dataset or turn off `depth_loss`")
                 metrics_dict["depth_loss"] = 0.0
+                metrics_dict["sigma"] = self.depth_sigma_current.item()
                 termination_depth = batch["depth_image"].to(self.device)
+                
 
             for i in range(len(outputs["weights_list"])):
                 if self.config.use_depth_loss:
@@ -170,8 +178,31 @@ class DepthNerfactoModel(NerfactoModel):
 
         return loss_dict
 
+    def _visualise_weights(
+        self,
+        outputs: Dict[str, Union[Tensor, List[Tensor]]],
+    ) -> Dict[str, List[Figure]]:
+        figures_dict = {}
+        if self.vis_weights_dist:
+            termination_depth = outputs.get("depth_image_list", None)
+            if termination_depth is not None:
+                termination_depth = termination_depth[0]
+
+            figures_dict["weights_dist"] = [
+                matplotlib_utis.plot_weights_distribution_multiprop(
+                    weights=outputs["weights_list"],
+                    steps=outputs["ray_steps_list"],
+                    termination_depth=termination_depth,
+                    i=i,
+                )
+                for i in range(self.config.num_rays_to_visualize)
+            ]
+        return figures_dict
+
     def get_image_metrics_and_images(
-        self, outputs: Dict[str, torch.Tensor], batch: Dict[str, torch.Tensor]
+        self,
+        outputs: Dict[str, torch.Tensor],
+        batch: Dict[str, torch.Tensor],
     ) -> Tuple[
         Dict[str, float],
         Dict[str, torch.Tensor],
@@ -196,8 +227,10 @@ class DepthNerfactoModel(NerfactoModel):
             ranking_depth = batch["depth_ranking_image"].to(self.device)
             depths_show.append(colormaps.apply_depth_colormap(ranking_depth))
 
+        predicted_depth = outputs[f"prop_depth_{self.config.num_proposal_iterations}"]
+
         predicted_depth_colormap = colormaps.apply_depth_colormap(
-            outputs[f"prop_depth_{self.config.num_proposal_iterations}"],
+            depth=predicted_depth,
             accumulation=outputs["accumulation"],
             near_plane=near_plane,
             far_plane=far_plane,
@@ -208,7 +241,7 @@ class DepthNerfactoModel(NerfactoModel):
         if self.config.use_depth_loss:
             depth_mask = termination_depth > 0
             metrics["depth_mse"] = torch.nn.functional.mse_loss(
-                outputs["depth"][depth_mask],
+                predicted_depth[depth_mask],
                 termination_depth[depth_mask]
             ).cpu().item()
 
@@ -225,5 +258,5 @@ class DepthNerfactoModel(NerfactoModel):
     def _set_ranking_loss_multiplier(self, step: int) -> None:
         """Sets up ranking loss multiplier."""
         self.ranking_loss_multiplier = self.config.depth_ranking_loss_mult * np.interp(
-            step, [0, 2000], [0, 0.2]
+            step, [0, 5000], [0, 0.2]
         )

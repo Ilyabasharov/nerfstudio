@@ -305,14 +305,15 @@ def urban_radiance_field_depth_loss(
     expected_depth_loss = (termination_depth - predicted_depth) ** 2
 
     # Line of sight losses
+    termination_depth = termination_depth[:, None]
+
     target_distribution = torch.distributions.normal.Normal(
-        scale=termination_depth, loc=sigma / URF_SIGMA_SCALE_FACTOR,
-    ).log_prob(steps).exp()
+        loc=0.0, scale=sigma / URF_SIGMA_SCALE_FACTOR,
+    ).log_prob(steps - termination_depth).exp_()
 
     # Fix error when Normal distibution is not sum up to one
     target_distribution /= target_distribution.sum(-2, keepdim=True)
 
-    termination_depth = termination_depth[:, None]
     line_of_sight_loss_near_mask = torch.logical_and(
         steps <= termination_depth + sigma,
         steps >= termination_depth - sigma,

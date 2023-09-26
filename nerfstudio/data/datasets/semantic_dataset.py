@@ -34,9 +34,17 @@ class SemanticDataset(InputDataset):
 
     exclude_batch_keys_from_device = InputDataset.exclude_batch_keys_from_device + ["mask", "semantics"]
 
-    def __init__(self, dataparser_outputs: DataparserOutputs, scale_factor: float = 1.0):
+    def __init__(
+        self,
+        dataparser_outputs: DataparserOutputs,
+        scale_factor: float = 1.0,
+        **kwargs,
+    ):
         super().__init__(dataparser_outputs, scale_factor)
-        assert "semantics" in dataparser_outputs.metadata.keys() and isinstance(self.metadata["semantics"], Semantics)
+        assert (
+            "semantics" in dataparser_outputs.metadata.keys()
+            and isinstance(self.metadata["semantics"], Semantics)
+        ), "Semantic data did not correctly defined."
         self.semantics = self.metadata["semantics"]
         self.mask_indices = torch.tensor(
             [self.semantics.classes.index(mask_class) for mask_class in self.semantics.mask_classes]

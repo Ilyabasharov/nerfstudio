@@ -418,8 +418,8 @@ class VanillaDataManager(DataManager, Generic[TDataset]):
         self.includes_time = self.dataparser.includes_time
         self.train_dataparser_outputs: DataparserOutputs = self.dataparser.get_dataparser_outputs(split="train")
 
-        self.train_dataset = self.create_train_dataset()
-        self.eval_dataset = self.create_eval_dataset()
+        self.train_dataset = self.create_train_dataset(**kwargs)
+        self.eval_dataset = self.create_eval_dataset(**kwargs)
         self.exclude_batch_keys_from_device = self.train_dataset.exclude_batch_keys_from_device
         if self.config.masks_on_gpu is True:
             self.exclude_batch_keys_from_device.remove("mask")
@@ -461,18 +461,20 @@ class VanillaDataManager(DataManager, Generic[TDataset]):
                         return cast(Type[TDataset], value)
         return default
 
-    def create_train_dataset(self) -> TDataset:
+    def create_train_dataset(self, **kwargs) -> TDataset:
         """Sets up the data loaders for training"""
         return self.dataset_type(
             dataparser_outputs=self.train_dataparser_outputs,
             scale_factor=self.config.camera_res_scale_factor,
+            **kwargs,
         )
 
-    def create_eval_dataset(self) -> TDataset:
+    def create_eval_dataset(self, **kwargs) -> TDataset:
         """Sets up the data loaders for evaluation"""
         return self.dataset_type(
             dataparser_outputs=self.dataparser.get_dataparser_outputs(split=self.test_split),
             scale_factor=self.config.camera_res_scale_factor,
+            **kwargs
         )
 
     def _get_pixel_sampler(self, dataset: TDataset, num_rays_per_batch: int) -> PixelSampler:

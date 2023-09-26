@@ -16,25 +16,24 @@
 Depth dataset.
 """
 
-from typing import Dict
+from typing import Dict, Union
 
 import gc
+import json
+from pathlib import Path
 import numpy as np
 import numpy.typing as npt
 import cv2
+import torch
+from torch import Tensor
+from jaxtyping import Float
+from rich.progress import track
 
 from nerfstudio.data.dataparsers.base_dataparser import DataparserOutputs
 from nerfstudio.model_components import losses
 from nerfstudio.data.datasets.base_dataset import InputDataset
 from nerfstudio.data.utils.data_utils import get_depth_image_from_path
 from nerfstudio.utils.rich_utils import CONSOLE
-
-from typing import Union
-from PIL import Image
-import torch
-from rich.progress import track
-from pathlib import Path
-import json
 
 
 class DepthDataset(InputDataset):
@@ -43,21 +42,38 @@ class DepthDataset(InputDataset):
     Args:
         dataparser_outputs: description of where and how to read input images.
         scale_factor: The scaling factor for the dataparser outputs.
+        use_pseudodepth: Whether to generate monodepth data for supervision.
     """
 
-    def __init__(self, dataparser_outputs: DataparserOutputs, scale_factor: float = 1.0):
+    def __init__(
+        self,
+        dataparser_outputs: DataparserOutputs,
+        scale_factor: float = 1.0,
+        use_pseudodepth: bool = True,
+        **kwargs,
+    ):
         super().__init__(dataparser_outputs, scale_factor)
+        assert len(dataparser_outputs.image_filenames) > 0, "Dataparser outputs are empty."
         # if there are no depth images than we want to generate them all with zoe depth
-        if len(dataparser_outputs.image_filenames) > 0 and (
+        # or we want to use both supervision
+        self.generate_preudodepth = False
+
+        if (
             "depth_filenames" not in dataparser_outputs.metadata.keys()
             or dataparser_outputs.metadata["depth_filenames"] is None
         ):
             CONSOLE.print("[bold yellow] No depth data found! Generating pseudodepth...")
             losses.FORCE_PSEUDODEPTH_LOSS = True
-            CONSOLE.print("[bold red] Using psueodepth: forcing depth loss to be ranking loss.")
+            self.generate_preudodepth = True
+            CONSOLE.print("[bold red] Using pseudodepth: forcing depth loss to be ranking loss.")
+        elif use_pseudodepth:
+            self.generate_preudodepth = True
+            CONSOLE.print("[bold red] Using pseudodepth as an additional supervision.")
+
+        if self.generate_preudodepth:
             cache = dataparser_outputs.image_filenames[0].parent / "depths.npy"
             # Note: this should probably be saved to disk as images, and then loaded with the dataparser.
-            # That will allow multi-gpu training. /home/ilyuha/nerfstudio/data/custom/kirill_flat
+            # That will allow multi-gpu training.
             if cache.exists():
                 CONSOLE.print("[bold yellow] Loading pseudodata depth from cache!")
                 # load all the depths
@@ -108,29 +124,36 @@ class DepthDataset(InputDataset):
                 gc.collect()
                 torch.cuda.empty_cache()
 
-            dataparser_outputs.metadata["depth_filenames"] = None
-            dataparser_outputs.metadata["depth_unit_scale_factor"] = 1.0
-            self.metadata["depth_filenames"] = None
-            self.metadata["depth_unit_scale_factor"] = 1.0
+            if losses.FORCE_PSEUDODEPTH_LOSS:
+                dataparser_outputs.metadata["depth_filenames"] = None
+                dataparser_outputs.metadata["depth_unit_scale_factor"] = 1.0
+                self.metadata["depth_filenames"] = None
+                self.metadata["depth_unit_scale_factor"] = 1.0
 
         self.depth_filenames = self.metadata["depth_filenames"]
         self.depth_unit_scale_factor = self.metadata["depth_unit_scale_factor"]
 
-    def get_metadata(self, data: Dict) -> Dict:
-        if self.depth_filenames is None:
-            return {"depth_ranking_image": self.depths[self._dataparser_outputs.image_filenames[data["image_idx"]]]}
+    def get_metadata(self, data: Dict) -> Dict[str, Float[Tensor, "h w 1"]]:
+        output_dict = {}
+        if self.generate_preudodepth:
+            output_dict["depth_ranking_image"] = self.depths[
+                self._dataparser_outputs.image_filenames[data["image_idx"]]
+            ]
+        if self.depth_filenames is not None:
+            filepath = self.depth_filenames[data["image_idx"]]
+            height = int(self._dataparser_outputs.cameras.height[data["image_idx"]])
+            width = int(self._dataparser_outputs.cameras.width[data["image_idx"]])
 
-        filepath = self.depth_filenames[data["image_idx"]]
-        height = int(self._dataparser_outputs.cameras.height[data["image_idx"]])
-        width = int(self._dataparser_outputs.cameras.width[data["image_idx"]])
+            # Scale depth images to meter units and also by scaling applied to cameras
+            scale_factor = self.depth_unit_scale_factor * self._dataparser_outputs.dataparser_scale
+            output_dict["depth_image"] = get_depth_image_from_path(
+                filepath=filepath,
+                height=height,
+                width=width,
+                scale_factor=scale_factor,
+            )
 
-        # Scale depth images to meter units and also by scaling applied to cameras
-        scale_factor = self.depth_unit_scale_factor * self._dataparser_outputs.dataparser_scale
-        depth_image = get_depth_image_from_path(
-            filepath=filepath, height=height, width=width, scale_factor=scale_factor
-        )
-
-        return {"depth_image": depth_image}
+        return output_dict
 
     def _find_transform(self, image_path: Path) -> Union[Path, None]:
         while image_path.parent != image_path:

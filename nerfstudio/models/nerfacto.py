@@ -431,10 +431,7 @@ class NerfactoModel(Model):
                         field_outputs[FieldHeadNames.PRED_NORMALS],
                     )
 
-        elif (
-            self.config.visualize_weights_distribution
-            and self.config.num_rays_to_visualize > 0
-        ):
+        elif self.vis_weights_dist:
             outputs["weights_list"] = [weights_prop.cpu() for weights_prop in weights_list]
             outputs["ray_steps_list"] = [
                 (ray_samples_prop.frustums.starts + ray_samples_prop.frustums.ends)
@@ -506,10 +503,7 @@ class NerfactoModel(Model):
         outputs: Dict[str, Union[Tensor, List[Tensor]]],
     ) -> Dict[str, List[Figure]]:
         figures_dict = {}
-        if (
-            self.config.visualize_weights_distribution
-            and self.config.num_rays_to_visualize > 0
-        ):
+        if self.vis_weights_dist:
             figures_dict["weights_dist"] = [
                 matplotlib_utis.plot_weights_distribution_multiprop(
                     weights=outputs["weights_list"],

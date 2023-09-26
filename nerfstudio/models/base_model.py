@@ -53,7 +53,7 @@ class ModelConfig(InstantiateConfig):
     """Specifies number of rays per chunk during eval"""
     prompt: Optional[str] = None
     """A prompt to be used in text to NeRF models"""
-    visualize_weights_distribution: bool = False
+    visualize_weights_distribution: bool = True
     """Whether to visualize distribution of model weights"""
     num_rays_to_visualize: int = 5
     """How many rays will be showed on distibution plot"""
@@ -209,11 +209,14 @@ class Model(nn.Module):
             for output_name, output in outputs.items():
                 if torch.is_tensor(output):
                     outputs_lists[output_name].append(output)
-                elif (
-                    isinstance(output, List) and
-                    all(map(torch.is_tensor, output))
-                ):
-                    if eval_and_vis_weights_dist:
+                if eval_and_vis_weights_dist:
+                    if output_name == "depth_image":
+                        output = [output, ]
+                        output_name = "depth_image_list"
+                    if (
+                        isinstance(output, List)
+                        and all(map(torch.is_tensor, output))
+                    ):
                         if output_name not in vis_outputs:
                             vis_outputs[output_name] = [[] for _ in output]
 

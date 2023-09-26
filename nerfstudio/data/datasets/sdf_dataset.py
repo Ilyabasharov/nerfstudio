@@ -36,7 +36,12 @@ class SDFDataset(InputDataset):
 
     exclude_batch_keys_from_device = InputDataset.exclude_batch_keys_from_device + ["depth", "normal"]
 
-    def __init__(self, dataparser_outputs: DataparserOutputs, scale_factor: float = 1.0):
+    def __init__(
+        self,
+        dataparser_outputs: DataparserOutputs,
+        scale_factor: float = 1.0,
+        **kwargs,
+    ):
         super().__init__(dataparser_outputs, scale_factor)
 
         # can be none if monoprior not included
