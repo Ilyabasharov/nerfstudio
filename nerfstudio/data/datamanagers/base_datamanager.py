@@ -71,9 +71,8 @@ from nerfstudio.data.utils.dataloaders import (
 from nerfstudio.data.utils.nerfstudio_collate import nerfstudio_collate
 from nerfstudio.engine.callbacks import TrainingCallback, TrainingCallbackAttributes
 from nerfstudio.model_components.ray_generators import RayGenerator
-from nerfstudio.utils.misc import IterableWrapper
 from nerfstudio.utils.rich_utils import CONSOLE
-from nerfstudio.utils.misc import get_orig_class
+from nerfstudio.utils.misc import IterableWrapper, get_orig_class, torch_compile
 
 
 def variable_res_collate(batch: List[Dict]) -> Dict:
@@ -559,15 +558,28 @@ class VanillaDataManager(DataManager, Generic[TDataset]):
             num_workers=self.world_size * 4,
         )
 
+    @torch_compile
+    def _next_train_compiled(self, image_batch):
+        assert self.train_pixel_sampler is not None
+        batch = self.train_pixel_sampler.sample(image_batch)
+        ray_indices = batch["indices"]
+        ray_bundle = self.train_ray_generator(ray_indices)
+        return ray_bundle, batch
+
     def next_train(self, step: int) -> Tuple[RayBundle, Dict]:
         """Returns the next batch of data from the train dataloader."""
         self.train_count += 1
         image_batch = next(self.iter_train_image_dataloader)
         assert self.train_pixel_sampler is not None
         assert isinstance(image_batch, dict)
-        batch = self.train_pixel_sampler.sample(image_batch)
+        return self._next_train_compiled(image_batch)
+
+    @torch_compile
+    def _next_eval_compiled(self, image_batch):
+        assert self.eval_pixel_sampler is not None
+        batch = self.eval_pixel_sampler.sample(image_batch)
         ray_indices = batch["indices"]
-        ray_bundle = self.train_ray_generator(ray_indices)
+        ray_bundle = self.eval_ray_generator(ray_indices)
         return ray_bundle, batch
 
     def next_eval(self, step: int) -> Tuple[RayBundle, Dict]:
@@ -576,10 +588,7 @@ class VanillaDataManager(DataManager, Generic[TDataset]):
         image_batch = next(self.iter_eval_image_dataloader)
         assert self.eval_pixel_sampler is not None
         assert isinstance(image_batch, dict)
-        batch = self.eval_pixel_sampler.sample(image_batch)
-        ray_indices = batch["indices"]
-        ray_bundle = self.eval_ray_generator(ray_indices)
-        return ray_bundle, batch
+        return self._next_eval_compiled(image_batch)
 
     def next_eval_image(self, step: int) -> Tuple[int, RayBundle, Dict]:
         for camera_ray_bundle, batch in self.eval_dataloader:

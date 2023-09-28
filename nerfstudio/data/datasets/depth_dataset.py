@@ -47,7 +47,7 @@ class DepthDataset(InputDataset):
         use_pseudodepth: Whether to generate monodepth data for supervision.
     """
 
-    exclude_batch_keys_from_device: List[str] = InputDataset.exclude_batch_keys_from_device + ["depth_image", "depth_image"]
+    exclude_batch_keys_from_device: List[str] = InputDataset.exclude_batch_keys_from_device + ["depth_image", "depth_ranking_image"]
 
     def __init__(
         self,

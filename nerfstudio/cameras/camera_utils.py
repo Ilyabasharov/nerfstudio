@@ -296,9 +296,9 @@ def normalize_with_norm(x: torch.Tensor, dim: int) -> Tuple[torch.Tensor, torch.
         Tuple of normalized tensor and corresponding norm.
     """
 
-    norm = torch.maximum(
-        torch.linalg.vector_norm(x, dim=dim, keepdims=True),
-        torch.tensor([_EPS]).to(x)
+    norm = (
+        torch.linalg.vector_norm(x, dim=dim, keepdims=True)
+        .clamp_min(_EPS)
     )
     return x / norm, norm
 
@@ -437,13 +437,19 @@ def radial_and_tangential_undistort(
 
     for _ in range(max_iterations):
         fx, fy, fx_x, fx_y, fy_x, fy_y = _compute_residual_and_jacobian(
-            x=x, y=y, xd=coords[..., 0], yd=coords[..., 1], distortion_params=distortion_params
+            x=x,
+            y=y,
+            xd=coords[..., 0],
+            yd=coords[..., 1],
+            distortion_params=distortion_params,
         )
         denominator = fy_x * fx_y - fx_x * fy_y
         x_numerator = fx * fy_y - fy * fx_y
         y_numerator = fy * fx_x - fx * fy_x
-        step_x = torch.where(torch.abs(denominator) > eps, x_numerator / denominator, torch.zeros_like(denominator))
-        step_y = torch.where(torch.abs(denominator) > eps, y_numerator / denominator, torch.zeros_like(denominator))
+
+        mask = torch.abs(denominator) > eps
+        step_x = torch.where(mask, x_numerator / denominator, 0)
+        step_y = torch.where(mask, y_numerator / denominator, 0)
 
         x = x + step_x
         y = y + step_y
@@ -479,7 +485,10 @@ def rotation_matrix(a: Float[Tensor, "3"], b: Float[Tensor, "3"]) -> Float[Tenso
     return torch.eye(3) + skew_sym_mat + skew_sym_mat @ skew_sym_mat * ((1 - c) / (s**2 + 1e-8))
 
 
-def focus_of_attention(poses: Float[Tensor, "*num_poses 4 4"], initial_focus: Float[Tensor, "3"]) -> Float[Tensor, "3"]:
+def focus_of_attention(
+    poses: Float[Tensor, "*num_poses 4 4"],
+    initial_focus: Float[Tensor, "3"],
+) -> Float[Tensor, "3"]:
     """Compute the focus of attention of a set of cameras. Only cameras
     that have the focus of attention in front of them are considered.
 
