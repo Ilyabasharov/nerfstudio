@@ -34,6 +34,7 @@ from nerfstudio.configs.config_utils import to_immutable_dict
 from nerfstudio.data.scene_box import SceneBox
 from nerfstudio.engine.callbacks import TrainingCallback, TrainingCallbackAttributes
 from nerfstudio.model_components.scene_colliders import NearFarCollider
+from nerfstudio.utils.misc import unravel_index
 
 
 # Model related configs
@@ -97,7 +98,7 @@ class Model(nn.Module):
             and self.config.num_rays_to_visualize > 0
         ):
             # keep indexes static for using less memery
-            self.visualize_pixel_indexes = torch.rand((self.config.num_rays_to_visualize, 1))
+            self.visualize_pixel_indexes = torch.rand((self.config.num_rays_to_visualize))
             self.vis_weights_dist = True
 
     @property
@@ -189,9 +190,7 @@ class Model(nn.Module):
         outputs_lists = defaultdict(list)
         flattened_camera_ray_bundle = camera_ray_bundle.flatten()
 
-        eval_and_vis_weights_dist = self.eval and self.vis_weights_dist
-
-        if eval_and_vis_weights_dist:
+        if self.vis_weights_dist:
             # tf uniform dist to [0, w * h - 1]
             vis_indexes = (
                 self.visualize_pixel_indexes
@@ -200,36 +199,35 @@ class Model(nn.Module):
                 .long()
             )
             vis_outputs = defaultdict(list)
+            vis_outputs['vis_indexes'] = [[unravel_index(vis_indexes, (image_height, image_width))]]
 
         for i in range(0, num_rays, num_rays_per_chunk):
             start_idx = i
             end_idx = i + num_rays_per_chunk
             ray_bundle = flattened_camera_ray_bundle[start_idx:end_idx]
             outputs = self.forward(ray_bundle=ray_bundle)
+            if self.vis_weights_dist:
+                vis_indexes_masked = vis_indexes[
+                    torch.logical_and(
+                        vis_indexes >= start_idx,
+                        vis_indexes < end_idx,
+                    )
+                ]
+
             for output_name, output in outputs.items():
                 if torch.is_tensor(output):
                     outputs_lists[output_name].append(output)
-                if eval_and_vis_weights_dist:
-                    if output_name == "depth_image":
-                        output = [output, ]
-                        output_name = "depth_image_list"
-                    if (
-                        isinstance(output, List)
-                        and all(map(torch.is_tensor, output))
-                    ):
+                elif (
+                    isinstance(output, List)
+                    and all(map(torch.is_tensor, output))
+                ):
+                    if self.vis_weights_dist:
                         if output_name not in vis_outputs:
                             vis_outputs[output_name] = [[] for _ in output]
 
-                        vis_indexes_mask = torch.logical_and(
-                            vis_indexes >= start_idx,
-                            vis_indexes < end_idx,
-                        )
-
                         for i, output_instance in enumerate(output):
                             vis_outputs[output_name][i].append(
-                                output_instance[
-                                    vis_indexes[vis_indexes_mask] - start_idx
-                                ]
+                                output_instance[vis_indexes_masked - start_idx]
                             )
 
         outputs = {}
@@ -239,7 +237,7 @@ class Model(nn.Module):
                 .view(image_height, image_width, -1)
             )
 
-        if eval_and_vis_weights_dist:
+        if self.vis_weights_dist:
             for output_name, outputs_list in vis_outputs.items():
                 outputs[output_name] = [
                     torch.cat(output_instance)

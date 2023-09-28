@@ -20,10 +20,12 @@ Miscellaneous helper code.
 from inspect import currentframe
 import typing
 import platform
-from typing import Any, Callable, Dict, List, Optional, TypeVar, Union
+from typing import Any, Callable, Dict, List, Optional, TypeVar, Union, Tuple
 import warnings
 
 import torch
+from torch import Tensor
+from jaxtyping import Int
 
 T = TypeVar("T")
 TKey = TypeVar("TKey")
@@ -219,3 +221,31 @@ def get_orig_class(obj, default=None):
             finally:
                 del frame
         return default
+
+
+def unravel_index(
+    indices: Int[Tensor, "... N"],
+    shape: Tuple[int, ...],
+) -> Int[Tensor, "... N D"]:
+    r"""Converts flat indices into unraveled coordinates in a target shape.
+
+    This is a `torch` implementation of `numpy.unravel_index`.
+
+    Args:
+        indices: A tensor of indices, (*, N).
+        shape: The targeted shape, (D,).
+
+    Returns:
+        unravel coordinates, (*, N, D).
+    """
+
+    shape: Tensor = torch.tensor(shape)
+    indices = indices % shape.prod()  # prevent out-of-bounds indices
+
+    coord = indices.new_zeros(indices.size() + shape.size())
+
+    for i, dim in enumerate(reversed(shape)):
+        coord[..., i] = indices % dim
+        indices = indices // dim
+
+    return coord.flip(-1)

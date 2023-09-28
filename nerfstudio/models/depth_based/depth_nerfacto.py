@@ -55,7 +55,7 @@ class DepthNerfactoModelConfig(NerfactoModelConfig):
     """Whether to exponentially decay sigma."""
     starting_depth_sigma: float = 0.2
     """Starting uncertainty around depth values in meters (defaults to 0.2m)."""
-    sigma_decay_rate: float = 0.99995
+    sigma_decay_rate: float = 0.99985
     """Rate of exponential decay."""
     use_depth_loss: bool = True
     """Whether to use depth ranking loss for absolute depth."""
@@ -181,12 +181,18 @@ class DepthNerfactoModel(NerfactoModel):
     def _visualise_weights(
         self,
         outputs: Dict[str, Union[Tensor, List[Tensor]]],
+        batch: Dict[str, torch.Tensor],
     ) -> Dict[str, List[Figure]]:
         figures_dict = {}
         if self.vis_weights_dist:
-            termination_depth = outputs.get("depth_image_list", None)
-            if termination_depth is not None:
-                termination_depth = termination_depth[0]
+            vis_indexes = outputs.get("vis_indexes", None)
+            termination_depth = batch.get("depth_image", None)
+
+            if termination_depth is not None and vis_indexes is not None:
+                termination_depth = termination_depth[
+                    vis_indexes[0][..., 0],
+                    vis_indexes[0][..., 1],
+                ].cpu()
 
             figures_dict["weights_dist"] = [
                 matplotlib_utis.plot_weights_distribution_multiprop(
@@ -201,7 +207,7 @@ class DepthNerfactoModel(NerfactoModel):
 
     def get_image_metrics_and_images(
         self,
-        outputs: Dict[str, torch.Tensor],
+        outputs: Dict[str, Union[Tensor, List[Tensor]]],
         batch: Dict[str, torch.Tensor],
     ) -> Tuple[
         Dict[str, float],

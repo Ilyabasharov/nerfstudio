@@ -501,6 +501,7 @@ class NerfactoModel(Model):
     def _visualise_weights(
         self,
         outputs: Dict[str, Union[Tensor, List[Tensor]]],
+        batch: Dict[str, torch.Tensor],
     ) -> Dict[str, List[Figure]]:
         figures_dict = {}
         if self.vis_weights_dist:
@@ -516,7 +517,7 @@ class NerfactoModel(Model):
 
     def get_image_metrics_and_images(
         self,
-        outputs: Dict[str, torch.Tensor],
+        outputs: Dict[str, Union[Tensor, List[Tensor]]],
         batch: Dict[str, torch.Tensor],
     ) -> Tuple[
         Dict[str, float],
@@ -593,6 +594,6 @@ class NerfactoModel(Model):
             )
             images_dict[key] = prop_depth_i
 
-        figures_dict = self._visualise_weights(outputs)
+        figures_dict = self._visualise_weights(outputs, batch)
 
         return metrics_dict, images_dict, figures_dict

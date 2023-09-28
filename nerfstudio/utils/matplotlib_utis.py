@@ -89,7 +89,7 @@ def plot_weights_distribution_multiprop(
     weights: List[Float[Tensor, "num_samples 1"]],
     steps: List[Float[Tensor, "num_samples 1"]],
     i: int,
-    termination_depth: Optional[Float[Tensor, "1"]] = None,
+    termination_depth: Optional[Float[Tensor, "num_samples 1"]] = None,
 
 ) -> Figure:
     """Plots weights and optionally ground truth depth on one figure.
@@ -106,7 +106,7 @@ def plot_weights_distribution_multiprop(
         weights=weights[j][i],
         steps=steps[j][i],
         prop_label="weights",
-        termination_depth=termination_depth,
+        termination_depth=termination_depth[i] if termination_depth is not None else None,
     )
 
     # second, superimpose the weights of the previous layers on the main plot

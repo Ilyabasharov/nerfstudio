@@ -527,16 +527,15 @@ method_configs["depth-ziprefnerfacto"] = TrainerConfig(
     method_name="depth-ziprefnerfacto",
     steps_per_eval_batch=500,
     steps_per_save=2000,
-    max_num_iterations=90000,
+    max_num_iterations=60000,
     mixed_precision=True,
-    gradient_accumulation_steps=2,
+    use_grad_scaler=True,
     pipeline=VanillaPipelineConfig(
         datamanager=VanillaDataManagerConfig(
             _target=VanillaDataManager[DepthDataset],
-            pixel_sampler=PairPixelSamplerConfig(num_rays_per_batch=2596),
-            dataparser=NerfstudioDataParserConfig(train_split_fraction=0.995),
-            camera_res_scale_factor=0.3,
-            train_num_rays_per_batch=2596,
+            pixel_sampler=PairPixelSamplerConfig(num_rays_per_batch=3296),
+            dataparser=NerfstudioDataParserConfig(train_split_fraction=0.994),
+            train_num_rays_per_batch=3296,
             eval_num_rays_per_batch=4096,
             pose_optimizer=PoseOptimizerConfig(
                 mode="SO3xR3",
@@ -549,8 +548,19 @@ method_configs["depth-ziprefnerfacto"] = TrainerConfig(
             ),
             intrinsic_optimizer=IntrinsicOptimizerConfig(
                 mode="square_scale",
-                optimizer=RAdamOptimizerConfig(lr=6e-4, eps=1e-8, weight_decay=1e-4),
+                optimizer=RAdamOptimizerConfig(lr=1e-4, eps=1e-8, weight_decay=1e-4),
                 scheduler=ExponentialDecaySchedulerConfig(
+                    warmup_steps=3000,
+                    delay_steps=15000,
+                    lr_final=1e-5,
+                    max_steps=50000,
+                ),
+            ),
+            distortion_optimizer=DistortionOptimizerConfig(
+                mode="shift",
+                optimizer=RAdamOptimizerConfig(lr=1e-4, eps=1e-8, weight_decay=1e-4),
+                scheduler=ExponentialDecaySchedulerConfig(
+                    delay_steps=25000,
                     warmup_steps=3000,
                     lr_final=1e-5,
                     max_steps=50000,
@@ -558,16 +568,22 @@ method_configs["depth-ziprefnerfacto"] = TrainerConfig(
             ),
         ),
         model=DepthZipRefNerfactoModelConfig(
-            eval_num_rays_per_chunk=1 << 12,
+            eval_num_rays_per_chunk=1 << 11,
             hidden_dim=512,
             hidden_dim_color=512,
             near_plane=0.0,
-            proposal_weights_anneal_max_num_iters=5000,
+            proposal_weights_anneal_max_num_iters=50000,
             use_bundle_adjust=False,
             use_gradient_scaling=False,
             compute_hash_regularization=True,
             proposal_warmup=50000,
-            num_proposal_samples_per_ray=(256, 128),
+            num_proposal_samples_per_ray=(256, 256),
+            visualize_weights_distribution=True,
+            proposal_net_args_list=[
+                {"hidden_dim": 64, "log2_hashmap_size": 17, "num_levels": 5, "max_res": 512, "use_linear": False, "features_per_level": 4},
+                {"hidden_dim": 64, "log2_hashmap_size": 17, "num_levels": 7, "max_res": 4096, "use_linear": False, "features_per_level": 4},
+            ],
+            features_per_level=8,
         ),
     ),
     optimizers={
@@ -575,7 +591,7 @@ method_configs["depth-ziprefnerfacto"] = TrainerConfig(
             "optimizer": RAdamOptimizerConfig(lr=4e-3, eps=1e-15, weight_decay=1e-7),
             "scheduler": ExponentialDecaySchedulerConfig(
                 warmup_steps=3000,
-                max_steps=120000,
+                max_steps=80000,
                 lr_final=5e-5,
             ),
         },
@@ -583,7 +599,7 @@ method_configs["depth-ziprefnerfacto"] = TrainerConfig(
             "optimizer": RAdamOptimizerConfig(lr=4e-3, eps=1e-15, weight_decay=1e-7),
             "scheduler": ExponentialDecaySchedulerConfig(
                 warmup_steps=3000,
-                max_steps=120000,
+                max_steps=80000,
                 lr_final=5e-5,
             ),
         },
