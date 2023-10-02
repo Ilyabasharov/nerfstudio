@@ -40,13 +40,7 @@ from nerfstudio.utils.math import (
 )
 from nerfstudio.utils.printing import print_tcnn_speed_warning
 from nerfstudio.cameras.bundle_adjustment import HashBundleAdjustment
-
-try:
-    import tinycudann as tcnn
-
-    TCNN_EXISTS = True
-except ModuleNotFoundError:
-    TCNN_EXISTS = False
+from nerfstudio.utils.external import tcnn, TCNN_EXISTS
 
 
 class Encoding(FieldComponent):

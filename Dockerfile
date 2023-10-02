@@ -92,7 +92,8 @@ RUN git clone --branch 2.1.0 https://ceres-solver.googlesource.com/ceres-solver.
     git checkout $(git describe --tags) && \
     mkdir build && \
     cd build && \
-    cmake .. -DBUILD_TESTING=OFF -DBUILD_EXAMPLES=OFF && \
+    cmake .. -DBUILD_TESTING=OFF \
+             -DBUILD_EXAMPLES=OFF && \
     make -j `nproc` && \
     make install && \
     cd ../.. && \
@@ -136,7 +137,7 @@ SHELL ["/bin/bash", "-c"]
 
 # Base packages installation
 ## Upgrade pip and install packages.
-RUN python3.10 -m pip install --upgrade pip setuptools pathtools promise pybind11 omegaconf
+RUN python3.10 -m pip install --upgrade pip setuptools pathtools promise pybind11 omegaconf ninja
 
 ## Install pytorch and submodules
 RUN CUDA_VER=${CUDA_VERSION%.*} && CUDA_VER=${CUDA_VER//./} && python3.10 -m pip install \
@@ -168,7 +169,7 @@ RUN git clone --branch v1.0 --recursive https://github.com/cvg/pyceres.git && \
     cd ..
 
 ## Install pixel perfect sfm.
-RUN git clone --branch v1.0 --recursive https://github.com/cvg/pixel-perfect-sfm.git && \
+RUN git clone --branch main --recursive https://github.com/cvg/pixel-perfect-sfm.git && \
     cd pixel-perfect-sfm && \
     python3.10 -m pip install -e . && \
     cd ..
@@ -184,5 +185,8 @@ RUN cd nerfstudio && \
 # Change working directory
 WORKDIR /workspace
 
-# Install nerfstudio cli auto completion and enter shell if no command was provided.
-CMD ns-install-cli --mode install && /bin/bash
+# Install nerfstudio cli auto completion
+RUN ns-install-cli --mode install
+
+# Bash as default entrypoint.
+CMD ["/bin/bash", "-l"]
