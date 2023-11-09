@@ -28,7 +28,7 @@ from matplotlib.figure import Figure
 
 from nerfstudio.cameras.rays import RayBundle
 from nerfstudio.model_components import losses
-from nerfstudio.model_components.losses import DepthLossType, depth_loss, depth_ranking_loss
+from nerfstudio.model_components.losses import DepthLossType, depth_ranking_loss
 from nerfstudio.models.nerfacto import NerfactoModel, NerfactoModelConfig
 from nerfstudio.engine.callbacks import (
     TrainingCallback,
@@ -49,7 +49,7 @@ class DepthNerfactoModelConfig(NerfactoModelConfig):
     """Lambda of the depth loss."""
     is_euclidean_depth: bool = False
     """Whether input depth maps are Euclidean distances (or z-distances)."""
-    depth_sigma: float = 0.01
+    depth_sigma: float = 0.02
     """Uncertainty around depth values in meters (defaults to 1cm)."""
     should_decay_sigma: bool = True
     """Whether to exponentially decay sigma."""
@@ -59,7 +59,7 @@ class DepthNerfactoModelConfig(NerfactoModelConfig):
     """Rate of exponential decay."""
     use_depth_loss: bool = True
     """Whether to use depth ranking loss for absolute depth."""
-    depth_loss_type: DepthLossType = DepthLossType.URF
+    depth_loss_type: DepthLossType = DepthLossType.POWURF
     """Depth loss type."""
     use_depth_ranking_loss: bool = True
     """Whether to use depth ranking loss for relative depth."""
@@ -94,6 +94,9 @@ class DepthNerfactoModel(NerfactoModel):
 
         self.use_depth_ranking_loss = self.config.use_depth_ranking_loss or losses.FORCE_PSEUDODEPTH_LOSS
         self.ranking_loss_multiplier = 0.0
+        
+        if self.config.use_depth_loss:
+            self.depth_loss = self.config.depth_loss_type.value(self.config.is_euclidean_depth)
 
     def get_outputs(self, ray_bundle: RayBundle):
         outputs = super().get_outputs(ray_bundle)
@@ -117,18 +120,16 @@ class DepthNerfactoModel(NerfactoModel):
                 metrics_dict["sigma"] = self.depth_sigma_current.item()
                 termination_depth = batch["depth_image"].to(self.device)
                 
-
             for i in range(len(outputs["weights_list"])):
                 if self.config.use_depth_loss:
-                    metrics_dict["depth_loss"] += depth_loss(
+                    metrics_dict["depth_loss"] += self.depth_loss(
+                        density=outputs["density_list"][i],
                         weights=outputs["weights_list"][i],
                         ray_samples=outputs["ray_samples_list"][i],
                         termination_depth=termination_depth,
                         predicted_depth=outputs[f"prop_depth_{i}"],
                         sigma=self.depth_sigma_current,
                         directions_norm=outputs["directions_norm"],
-                        is_euclidean=self.config.is_euclidean_depth,
-                        depth_loss_type=self.config.depth_loss_type,
                     ) / len(outputs["weights_list"])
 
                 if self.use_depth_ranking_loss:
@@ -144,7 +145,7 @@ class DepthNerfactoModel(NerfactoModel):
         return metrics_dict
 
     def get_training_callbacks(
-        self, training_callback_attributes: TrainingCallbackAttributes
+        self, training_callback_attributes: TrainingCallbackAttributes,
     ) -> List[TrainingCallback]:
         callbacks = super().get_training_callbacks(training_callback_attributes)
 

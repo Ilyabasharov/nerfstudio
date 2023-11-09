@@ -16,7 +16,6 @@
 Field for compound nerf model, adds scene contraction and image embeddings to instant ngp
 """
 
-
 from typing import Dict, Literal, Optional, Tuple, Callable, Union
 from jaxtyping import Int, Float
 
@@ -72,6 +71,7 @@ class NerfactoField(Field):
         shift_scale_out_dim: if not use use_appearance_embedding, dim of out shift and scale vectors
         spatial_distortion: spatial distortion to apply to the scene
         compute_hash_regularization: whether to compute regularization on hash weights
+        compute_appearence_regularization: whether to appearence regularization on embeddings
         regularize_function: type of regularization
     """
 
@@ -106,6 +106,7 @@ class NerfactoField(Field):
         use_average_appearance_embedding: bool = False,
         spatial_distortion: Optional[SpatialDistortion] = None,
         compute_hash_regularization: bool = False,
+        compute_appearence_regularization: bool = False,
         regularize_function: Callable[[Tensor], Tensor] = torch.square,
         implementation: Literal["tcnn", "torch"] = "tcnn",
     ) -> None:
@@ -132,7 +133,9 @@ class NerfactoField(Field):
         self.pass_semantic_gradients = pass_semantic_gradients
         self.base_res = base_res
         self.compute_hash_regularization = compute_hash_regularization
+        self.compute_appearence_regularization = compute_appearence_regularization
         self.regularize_function = regularize_function
+        self.hidden_dim = hidden_dim
 
         self.direction_encoding = SHEncoding(
             levels=4,
@@ -282,7 +285,7 @@ class NerfactoField(Field):
             if not self.use_appearance_embedding:
                 output = self.affine_mlp(embedded_appearance.view(-1, self.appearance_embedding_dim))
                 scale, shift = torch.split(output, [self.shift_scale_out_dim, self.shift_scale_out_dim], dim=-1)  # type: ignore
-                scale = scale.exp()
+                scale = trunc_exp(scale)
         else:
             multiplier = self.embedding_appearance.mean(dim=0) if self.use_average_appearance_embedding else 0.0
             embedded_appearance = torch.ones(
@@ -360,7 +363,23 @@ class NerfactoField(Field):
             torch.cat(inputs_mlp_head, dim=-1),
         ).view(*outputs_shape, -1).to(directions)
 
-        if self.compute_hash_regularization:
-            outputs[FieldHeadNames.HASH_DECAY] = self.mlp_base_grid.regularize_hash_pyramid(self.regularize_function)
+        # finally, compute regularisations for stable training
+        self._compute_regularisations(outputs, camera_indices)
 
         return outputs
+
+    def _compute_regularisations(
+        self,
+        outputs: Dict[FieldHeadNames, Tensor],
+        camera_indices: Int[Tensor, "num_trainable_cameras"],
+    ) -> None:
+        if self.training:
+            if self.compute_hash_regularization:
+                outputs[FieldHeadNames.HASH_DECAY] = \
+                    self.mlp_base_grid.regularize_hash_pyramid(self.regularize_function)
+            if self.compute_appearence_regularization:
+                outputs[FieldHeadNames.APPEARENCE_DECAY] = \
+                    self.embedding_appearance.regularize_appearence(
+                        self.regularize_function,
+                        camera_indices=camera_indices,
+                    )

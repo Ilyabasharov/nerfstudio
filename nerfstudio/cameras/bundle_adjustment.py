@@ -65,6 +65,10 @@ class BundleAdjustment(nn.Module):
         """Record current step"""
         self.step = step
 
+        # Turn off bundle adjustment
+        if self.get_progress() >= 1:
+            self.use_bundle_adjust = False
+
     def mask_freqs(
         self,
         input_features: Float[Tensor, "*bs features"],
@@ -78,7 +82,7 @@ class BundleAdjustment(nn.Module):
             return 1.0
 
         start, end = self.coarse_to_fine_iters # type: ignore
-        return ((self.step / self.max_iters) - start) / (end - start)
+        return min(((self.step / self.max_iters) - start) / (end - start), 1)
 
 
 class HashBundleAdjustment(BundleAdjustment):
@@ -87,7 +91,7 @@ class HashBundleAdjustment(BundleAdjustment):
     def _get_masks(
         self,
         input_features: Float[Tensor, "*bs num_levels features_per_level"],
-    ) -> Optional[Float[Tensor, "*bs num_levels features_per_level"]]:
+    ) -> Float[Tensor, "*bs num_levels features_per_level"]:
         """Get frequency masks
         Args:
             input_features: array of the hashgrid values
@@ -95,14 +99,15 @@ class HashBundleAdjustment(BundleAdjustment):
         B, (L, F) = input_features.shape[:-2], input_features.shape[-2:]
         start, end = self.coarse_to_fine_iters # type: ignore
         # From https://arxiv.org/pdf/2104.06405.pdf equation 14
-        alpha = ((self.step / self.max_iters) - start) / (end - start) * L
+        # to prevent all weights to be 0, we leave the features from the first grid alone.
+        alpha = ((self.step / self.max_iters) - start) / (end - start) * (L - 1)
 
-        if alpha > L:
-            return None
+        if alpha > L or L == 1:
+            return input_features.new_ones(L)
 
-        k = torch.arange(L, dtype=input_features.dtype, device=input_features.device)
+        k = torch.arange(L - 1, dtype=input_features.dtype, device=input_features.device)
         mask_vals = (1 - (alpha - k).clamp_(min=0, max=1).mul_(torch.pi).cos_()) / 2
-        mask_vals = mask_vals[None, ..., None].repeat((*B, 1, F))
+        mask_vals = torch.cat([mask_vals.new_ones(1), mask_vals])
 
         return mask_vals
 
@@ -114,8 +119,8 @@ class HashBundleAdjustment(BundleAdjustment):
         Args:
             input_features: array of the hashgrid values
         """
-        mask_vals = self._get_masks(input_features)
-        return input_features if mask_vals is None else mask_vals * input_features
+        mask_vals = self._get_masks(input_features)[None, ..., None]
+        return mask_vals * input_features
 
 
 class HashGradBundleAdjustment(HashBundleAdjustment):
@@ -132,7 +137,7 @@ class HashGradBundleAdjustment(HashBundleAdjustment):
         input_features: Float[Tensor, "*bs num_levels features_per_level"],
     ) -> Float[Tensor, "*bs num_levels features_per_level"]:
 
-        mask_vals = self._get_masks(input_features)
+        mask_vals = self._get_masks(input_features)[None, ..., None]
 
         masked = input_features
         if self.training and mask_vals is not None:
@@ -141,8 +146,39 @@ class HashGradBundleAdjustment(HashBundleAdjustment):
         return masked
 
 
+class HashAcceleratedBundleAdjustment(HashBundleAdjustment):
+    """Bundle-Adjusting Accelerated Neural Graphics Primitives
+    Proposed in https://arxiv.org/abs/2306.04166
+
+    Args:
+        bundle_adjust: whether to use bundle adjustment
+        coarse_to_fine_iters: iterations (percentage of max iters) at which bundle adjustment is active
+    """
+
+    def mask_freqs(
+        self,
+        input_features: Float[Tensor, "*bs num_levels features_per_level"],
+    ) -> Float[Tensor, "*bs num_levels features_per_level"]:
+        """Masking input features per each hash level
+        Args:
+            input_features: array of the hashgrid values
+        """
+        mask_vals = self._get_masks(input_features)
+        available_features = input_features[:, mask_vals > 0]
+        mask_vals = mask_vals[None, :, None]
+
+        # the set of features that has the highest grid level with a nonzero weight
+        coarse_features = available_features[:, -1:]
+        coarse_repeats = coarse_features.expand_as(input_features)
+
+        # see eq. 8
+        encoded_x = input_features * mask_vals + coarse_repeats * (1 - mask_vals)
+        return encoded_x
+
+
 class BundleAdjustmentType(Enum):
-    """Types of depth losses for depth supervision."""
+    """Types of bundle adjustment for pass gradients through encoding."""
 
     BARF = HashBundleAdjustment
     CAMP = HashGradBundleAdjustment
+    BAANGP = HashGradBundleAdjustment

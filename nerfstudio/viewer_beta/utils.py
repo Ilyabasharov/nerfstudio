@@ -13,7 +13,7 @@
 # limitations under the License.
 
 from dataclasses import dataclass
-from typing import Optional, Tuple, Union
+from typing import Optional, Tuple
 
 import numpy as np
 import torch
@@ -22,6 +22,7 @@ from jaxtyping import Float
 from nerfstudio.cameras.cameras import Cameras, CameraType
 from nerfstudio.data.scene_box import SceneBox
 from nerfstudio.models.base_model import Model
+from nerfstudio.utils.misc import Numeric
 
 
 @dataclass
@@ -37,7 +38,9 @@ class CameraState:
 
 
 def get_camera(
-    camera_state: CameraState, image_height: int, image_width: Optional[Union[int, float]] = None
+    camera_state: CameraState,
+    image_height: int,
+    image_width: Optional[Numeric] = None,
 ) -> Cameras:
     """Returns the camera intrinsics matrix and the camera to world homogeneous matrix.
 

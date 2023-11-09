@@ -55,7 +55,7 @@ class ZipRefNerfactoField(ZipNerfactoField, RefNerfactoField):
         use_appearance_embedding: whether to use use_appearance_embedding or predict scales to bottleneck vector
         spatial_distortion: spatial distortion to apply to the scene
         regularize_function: type of regularization
-        deg_view: degree of encoding for viewdirs or refdirs
+        levels: degree of encoding for viewdirs or refdirs
         use_ide_enc: if true, use IDE to encode directions
         use_pred_roughness: if False and if use_ide_enc is True, use zero roughness in IDE
         roughness_bias: shift added to raw roughness pre-activation
@@ -73,7 +73,6 @@ class ZipRefNerfactoField(ZipNerfactoField, RefNerfactoField):
     """
 
     aabb: Tensor
-    bundle_adjustment: HashBundleAdjustment
 
     def __init__(
         self,
@@ -106,7 +105,7 @@ class ZipRefNerfactoField(ZipNerfactoField, RefNerfactoField):
         scale_featurization: bool = True,
         compute_hash_regularization: bool = True,
         use_reflections: bool = True,
-        deg_view: int = 5,
+        levels: int = 5,
         use_ide_enc: bool = True,
         use_pred_roughness: bool = True,
         roughness_bias: float = -1.0,
@@ -151,7 +150,7 @@ class ZipRefNerfactoField(ZipNerfactoField, RefNerfactoField):
             regularize_function=regularize_function,
             compute_hash_regularization=compute_hash_regularization,
             use_reflections=use_reflections,
-            deg_view=deg_view,
+            levels=levels,
             use_ide_enc=use_ide_enc,
             use_pred_roughness=use_pred_roughness,
             roughness_bias=roughness_bias,

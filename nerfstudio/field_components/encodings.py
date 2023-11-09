@@ -34,10 +34,9 @@ from nerfstudio.utils.math import (
     expected_sin,
     grid_resolution,
     grid_scale,
-    powi,
     next_multiple,
-    sph_harm_coeff,
 )
+from nerfstudio.field_components.activations import trunc_exp
 from nerfstudio.utils.printing import print_tcnn_speed_warning
 from nerfstudio.cameras.bundle_adjustment import HashBundleAdjustment
 from nerfstudio.utils.external import tcnn, TCNN_EXISTS
@@ -358,7 +357,7 @@ class HashEncoding(Encoding):
         for i in range(self.num_levels):
             resolution = grid_resolution(grid_scale(i, math.log2(self.growth_factor), self.min_res))
             resolutions.append(resolution)
-            params_in_level = powi(resolution, self.in_dim)  # type: ignore
+            params_in_level = pow(resolution, self.in_dim)  # type: ignore
             params_in_level = next_multiple(params_in_level, 8)
             params_in_level = min(params_in_level, (2**self.log2_hashmap_size))
             offsets.append(offset)
@@ -376,7 +375,12 @@ class HashEncoding(Encoding):
 
         return level_indexes
 
-    def hash_fn(self, in_tensor: Int[Tensor, "*bs num_levels 3"]) -> Shaped[Tensor, "*bs num_levels"]:
+    def hash_fn(
+        self,
+        in_tensor_x: Int[Tensor, "*bs num_levels"],
+        in_tensor_y: Int[Tensor, "*bs num_levels"],
+        in_tensor_z: Int[Tensor, "*bs num_levels"],
+    ) -> Shaped[Tensor, "*bs num_levels"]:
         """Returns hash tensor using method described in Instant-NGP
 
         Args:
@@ -388,9 +392,8 @@ class HashEncoding(Encoding):
         # assert min_val >= 0.0
         # assert max_val <= 1.0
 
-        in_tensor = in_tensor * self.hash_values
-        x = torch.bitwise_xor(in_tensor[..., 0], in_tensor[..., 1])
-        x = torch.bitwise_xor(x, in_tensor[..., 2])
+        x = torch.bitwise_xor(in_tensor_x * self.hash_values[0], in_tensor_y * self.hash_values[1])
+        x = torch.bitwise_xor(x, in_tensor_z * self.hash_values[2])
         x %= self.hash_table_size
         x += self.hash_offset
         return x
@@ -406,14 +409,21 @@ class HashEncoding(Encoding):
 
         offset = scaled - scaled_f
 
-        hashed_0 = self.hash_fn(scaled_c)  # [..., num_levels]
-        hashed_1 = self.hash_fn(torch.cat([scaled_c[..., 0:1], scaled_f[..., 1:2], scaled_c[..., 2:3]], dim=-1))
-        hashed_2 = self.hash_fn(torch.cat([scaled_f[..., 0:1], scaled_f[..., 1:2], scaled_c[..., 2:3]], dim=-1))
-        hashed_3 = self.hash_fn(torch.cat([scaled_f[..., 0:1], scaled_c[..., 1:2], scaled_c[..., 2:3]], dim=-1))
-        hashed_4 = self.hash_fn(torch.cat([scaled_c[..., 0:1], scaled_c[..., 1:2], scaled_f[..., 2:3]], dim=-1))
-        hashed_5 = self.hash_fn(torch.cat([scaled_c[..., 0:1], scaled_f[..., 1:2], scaled_f[..., 2:3]], dim=-1))
-        hashed_6 = self.hash_fn(scaled_f)
-        hashed_7 = self.hash_fn(torch.cat([scaled_f[..., 0:1], scaled_c[..., 1:2], scaled_f[..., 2:3]], dim=-1))
+        scaled_cx = scaled_c[..., 0]
+        scaled_cy = scaled_c[..., 1]
+        scaled_cz = scaled_c[..., 2]
+        scaled_fx = scaled_f[..., 0]
+        scaled_fy = scaled_f[..., 1]
+        scaled_fz = scaled_f[..., 2]
+
+        hashed_0 = self.hash_fn(scaled_cx, scaled_cy, scaled_cz)  # [..., num_levels]
+        hashed_1 = self.hash_fn(scaled_cx, scaled_fy, scaled_cz)
+        hashed_2 = self.hash_fn(scaled_fx, scaled_fy, scaled_cz)
+        hashed_3 = self.hash_fn(scaled_fx, scaled_cy, scaled_cz)
+        hashed_4 = self.hash_fn(scaled_cx, scaled_cy, scaled_fz)
+        hashed_5 = self.hash_fn(scaled_cx, scaled_fy, scaled_fz)
+        hashed_6 = self.hash_fn(scaled_fx, scaled_fy, scaled_fz)
+        hashed_7 = self.hash_fn(scaled_fx, scaled_cy, scaled_fz)
 
         f_0 = self.hash_table[hashed_0]  # [..., num_levels, features_per_level]
         f_1 = self.hash_table[hashed_1]
@@ -424,23 +434,42 @@ class HashEncoding(Encoding):
         f_6 = self.hash_table[hashed_6]
         f_7 = self.hash_table[hashed_7]
 
-        f_03 = f_0 * offset[..., 0:1] + f_3 * (1 - offset[..., 0:1])
-        f_12 = f_1 * offset[..., 0:1] + f_2 * (1 - offset[..., 0:1])
-        f_56 = f_5 * offset[..., 0:1] + f_6 * (1 - offset[..., 0:1])
-        f_47 = f_4 * offset[..., 0:1] + f_7 * (1 - offset[..., 0:1])
+        offset_x = offset[..., 0:1]
+        offset_y = offset[..., 1:2]
+        offset_z = offset[..., 2:3]
 
-        f0312 = f_03 * offset[..., 1:2] + f_12 * (1 - offset[..., 1:2])
-        f4756 = f_47 * offset[..., 1:2] + f_56 * (1 - offset[..., 1:2])
+        f_03 = f_0 * offset_x + f_3 * (1 - offset_x)
+        f_12 = f_1 * offset_x + f_2 * (1 - offset_x)
+        f_56 = f_5 * offset_x + f_6 * (1 - offset_x)
+        f_47 = f_4 * offset_x + f_7 * (1 - offset_x)
 
-        encoded_value = f0312 * offset[..., 2:3] + f4756 * (
-            1 - offset[..., 2:3]
+        f0312 = f_03 * offset_y + f_12 * (1 - offset_y)
+        f4756 = f_47 * offset_y + f_56 * (1 - offset_y)
+
+        encoded_value = f0312 * offset_z + f4756 * (
+            1 - offset_z
         )  # [..., num_levels, features_per_level]
 
-        return torch.flatten(encoded_value, start_dim=-2, end_dim=-1)  # [..., num_levels * features_per_level]
+        return encoded_value.flatten(start_dim=-2, end_dim=-1)  # [..., num_levels * features_per_level]
 
+    # def regularize_hash_pyramid(
+    #     self,
+    #     regularize_fn: Callable[[Tensor], Tensor] = torch.square,
+    # ) -> Float[Tensor, "0"]:
+    #     """Regularize hash pyramid weights."""
+    #     hash_decay = self.hash_table.new_zeros((self.num_levels, self.features_per_level))
+    #     hash_decay = hash_decay.scatter_reduce_(
+    #         dim=0,
+    #         index=self.level_indexes[..., None].repeat(1, self.features_per_level),
+    #         src=regularize_fn(self.hash_table.view(-1, self.features_per_level)),
+    #         reduce="mean",
+    #     ).mean(dim=-2).sum()
+
+    #     return hash_decay
+    
     def regularize_hash_pyramid(
         self,
-        regularize_fn: Callable[[Tensor], Tensor] = torch.abs,
+        regularize_fn: Callable[[Tensor], Tensor] = torch.square,
     ) -> Float[Tensor, "0"]:
         """Regularize hash pyramid weights."""
         hash_decay = segment_coo(
@@ -451,7 +480,7 @@ class HashEncoding(Encoding):
         ).mean()
 
         return hash_decay
-
+    
     def scale_featurization(self) -> Float[Tensor, "*num_levels"]:
         """Compute scale featurization proposed in ZipNeRF paper."""
         scale_feat = segment_coo(
@@ -463,11 +492,23 @@ class HashEncoding(Encoding):
 
         return scale_feat
 
+    # def scale_featurization(self) -> Float[Tensor, "*num_levels"]:
+    #     """Compute scale featurization proposed in ZipNeRF paper."""
+    #     scale_feat = self.hash_table.new_zeros(self.num_levels)
+    #     scale_feat = scale_feat.scatter_reduce_(
+    #         dim=0,
+    #         index=self.level_indexes,
+    #         src=self.hash_table.view(-1, self.features_per_level).pow(2).sum(-1),
+    #         reduce="mean",
+    #     )
+
+    #     return scale_feat
+
     def forward(
         self,
         in_tensor: Shaped[Tensor, "*bs input_dim"],
     ) -> Shaped[Tensor, "*bs output_dim"]:
-
+        """Forward pass."""
         out = self.custom_forward(in_tensor)
         if self.bundle_adjustment.use_bundle_adjust:
             out = self.bundle_adjustment(
@@ -774,8 +815,8 @@ class SHEncoding(Encoding):
     def __init__(self, levels: int = 4, implementation: Literal["tcnn", "torch"] = "torch") -> None:
         super().__init__(in_dim=3)
 
-        if levels <= 0 or levels > 4:
-            raise ValueError(f"Spherical harmonic encoding only supports 1 to 4 levels, requested {levels}")
+        if levels <= 0 or levels > 8:
+            raise ValueError(f"Spherical harmonic encoding only supports 1 to 8 levels, requested {levels}")
 
         self.levels = levels
 
@@ -804,54 +845,37 @@ class SHEncoding(Encoding):
         if self.tcnn_encoding is not None:
             return self.tcnn_encoding(in_tensor)
         return self.pytorch_fwd(in_tensor)
+    
 
-
-class IDEncoding(Encoding):
+class IDEncoding(SHEncoding):
     """Module for integrated directional encoding (IDE).
         from Equations 6-8 of arxiv.org/abs/2112.03907.
+    
+        Args:
+            levels: Number of spherical harmonic levels to encode.
     """
 
-    def __init__(self, deg_view: int = 4) -> None:
-        """Initialize integrated directional encoding (IDE) module.
-        Args:
-            deg_view: number of spherical harmonics degrees to use.
-        """
-        super().__init__(in_dim=3)
-        self.deg_view = deg_view
+    harmonic_counts: List[int] = [1, 3, 5, 7, 9, 11, 13, 15]
 
-        if deg_view > 4:
-            raise ValueError("Only deg_view of at most 4 is numerically stable.")
+    def __init__(self, levels: int = 4, implementation: Literal["tcnn", "torch"] = "torch") -> None:
+        if implementation != "torch":
+            raise NotImplementedError(f"Only torch now supported, got {implementation}")
+        
+        super().__init__(levels=levels, implementation=implementation)
 
-        ml_array = self._get_ml_array(deg_view)
-        l_max = 2 ** (deg_view - 1)
+        levels_count = torch.tensor([
+            x for i, y in enumerate(self.harmonic_counts[:levels])
+            for x in [i] * y
+        ])
 
-        # Create a matrix corresponding to ml_array holding all coefficients, which,
-        # when multiplied (from the right) by the z coordinate Vandermonde matrix,
-        # results in the z component of the encoding.
-        mat = np.zeros((l_max + 1, ml_array.shape[1]))
-        for i, (m, l) in enumerate(ml_array.T):
-            for k in range(l - m + 1):
-                mat[k, i] = sph_harm_coeff(l, m, k)
-
-        sigma = 0.5 * ml_array[1, :] * (ml_array[1, :] + 1)
-        self.register_buffer("mat", torch.from_numpy(mat).to(torch.float32), False)
-        self.register_buffer("ml_array", torch.from_numpy(ml_array).to(torch.float32), False)
-        self.register_buffer("pow_level", torch.arange(l_max + 1).to(torch.float32), False)
-        self.register_buffer("sigma", torch.from_numpy(sigma).to(torch.float32), False)
-
-    def get_out_dim(self) -> int:
-        return (2**self.deg_view - 1 + self.deg_view) * 2
-
-    @staticmethod
-    def _get_ml_array(deg_view: int) -> np.ndarray:
-        """Create a list with all pairs of (l, m) values to use in the encoding."""
-        ml_list = [(m, 2**i) for i in range(deg_view) for m in range(2**i + 1)]
-        ml_array = np.array(ml_list).T
-        return ml_array
+        self.register_buffer(
+            "sigma",
+            (levels_count + 1) * levels_count / 2,
+        )
 
     def forward(
         self,
-        in_tensor: Float[Tensor, "*bs input_dim"],
+        in_tensor: Float[Tensor, "*bs 3"],
         roughness: Float[Tensor, "*bs 1"],
     ) -> Float[Tensor, "*bs output_dim"]:
         """Compute integrated directional encoding (IDE).
@@ -860,17 +884,8 @@ class IDEncoding(Encoding):
             roughness: [..., 1] reciprocal of the concentration parameter of the von
                 Mises-Fisher distribution.
         """
-        x = in_tensor[..., 0:1]
-        y = in_tensor[..., 1:2]
-        z = in_tensor[..., 2:3]
-
-        # avoid 0 + 0j exponentiation
-        zero_xy = torch.logical_and(x == 0, y == 0)
-        y = y + zero_xy
-
-        vmz = z ** self.pow_level
-        vmxy = (x + 1j * y) ** self.ml_array[0, :]
-        sph_harms = vmxy * torch.matmul(vmz, self.mat)
-        ide = sph_harms * torch.exp(-self.sigma * roughness)
-
-        return torch.cat([torch.real(ide), torch.imag(ide)], dim=-1)
+        # Apply attenuation function using the von Mises-Fisher distribution
+        # concentration parameter, kappa.
+        attenuation = trunc_exp(-roughness * self.sigma)
+        harmonics = components_from_spherical_harmonics(self.levels, in_tensor)
+        return harmonics * attenuation

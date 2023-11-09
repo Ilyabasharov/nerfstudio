@@ -30,6 +30,7 @@ from nerfstudio.utils.math import (
     multisampled_frustum_to_gaussian,
 )
 from nerfstudio.utils.tensor_dataclass import TensorDataclass
+from nerfstudio.utils.misc import torch_compile
 
 TORCH_DEVICE = Union[str, torch.device]
 
@@ -57,7 +58,7 @@ class Frustums(TensorDataclass):
         Returns:
             xyz positions.
         """
-        pos = self.origins + self.directions * (self.starts + self.ends) / 2
+        pos = self.origins + self.directions * self.get_steps()
         if self.offsets is not None:
             pos = pos + self.offsets
         return pos
@@ -119,12 +120,30 @@ class Frustums(TensorDataclass):
             A size 1 frustum with meaningless values.
         """
         return Frustums(
-            origins=torch.ones((1, 3)).to(device),
-            directions=torch.ones((1, 3)).to(device),
-            starts=torch.ones((1, 1)).to(device),
-            ends=torch.ones((1, 1)).to(device),
-            pixel_area=torch.ones((1, 1)).to(device),
+            origins=torch.ones((1, 3), device=device),
+            directions=torch.ones((1, 3), device=device),
+            starts=torch.ones((1, 1), device=device),
+            ends=torch.ones((1, 1), device=device),
+            pixel_area=torch.ones((1, 1), device=device),
         )
+    
+    def get_steps(self) -> Float[Tensor, "*bs 1"]:
+        """Helper function to get steps.
+
+        Returns:
+            Middle points between samples.
+        """
+
+        return (self.starts + self.ends) / 2
+    
+    def get_length(self) -> Float[Tensor, "*bs 1"]:
+        """Helper function to get lengths.
+
+        Returns:
+            Distance between samples.
+        """
+
+        return self.ends - self.starts
 
 
 @dataclass
@@ -145,11 +164,14 @@ class RaySamples(TensorDataclass):
     """Function to convert bins to euclidean distance."""
     metadata: Optional[Dict[str, Shaped[Tensor, "*bs latent_dims"]]] = None
     """additional information relevant to generating ray samples"""
-
     times: Optional[Float[Tensor, "*batch 1"]] = None
     """Times at which rays are sampled"""
 
-    def get_weights(self, densities: Float[Tensor, "*batch num_samples 1"]) -> Float[Tensor, "*batch num_samples 1"]:
+    @torch_compile(dynamic=True)
+    def get_weights(
+        self,
+        densities: Float[Tensor, "*batch num_samples 1"],
+    ) -> Float[Tensor, "*batch num_samples 1"]:
         """Return weights based on predicted densities
 
         Args:
@@ -159,19 +181,49 @@ class RaySamples(TensorDataclass):
             Weights for each sample
         """
 
-        delta_density = self.deltas * densities
-        alphas = 1 - torch.exp(-delta_density)
-
-        transmittance = torch.cumsum(delta_density[..., :-1, :], dim=-2)
-        transmittance = torch.cat(
-            [torch.zeros((*transmittance.shape[:1], 1, 1), device=densities.device), transmittance], dim=-2
+        transmittance, alphas = self.get_transmittance(
+            densities=densities,
+            transmittance_only=False,
         )
-        transmittance = torch.exp(-transmittance)  # [..., "num_samples"]
 
         weights = alphas * transmittance  # [..., "num_samples"]
         weights = torch.nan_to_num(weights)
 
         return weights
+    
+    @torch_compile(dynamic=True)
+    def get_transmittance(
+        self,
+        densities: Float[Tensor, "*batch num_samples 1"],
+        transmittance_only: bool = False,
+    ) -> Float[Tensor, "*batch num_samples 1"]:
+        """Return transmittances based on predicted densities
+
+        Args:
+            densities: Predicted densities for samples along ray
+            transmittance_only: Whether returns only transmittance 
+
+        Returns:
+            Transmittance for each sample
+        """
+
+        delta_density = self.deltas * densities
+        alphas = 1 - torch.exp(-delta_density)
+
+        transmittance = torch.cumsum(delta_density[..., :-1, :], dim=-2)
+        transmittance = torch.cat(
+            [
+                torch.zeros((*transmittance.shape[:1], 1, 1), device=densities.device),
+                transmittance,
+            ],
+            dim=-2,
+        )
+        transmittance = torch.exp(-transmittance)  # [..., "num_samples"]
+
+        if transmittance_only:
+            return transmittance
+
+        return transmittance, alphas
 
     @overload
     @staticmethod

@@ -29,6 +29,7 @@ from jaxtyping import Int
 
 T = TypeVar("T")
 TKey = TypeVar("TKey")
+Numeric = Union[int, float]
 
 
 def get_dict_to_torch(stuff: T, device: Union[torch.device, str] = "cpu", exclude: Optional[List[str]] = None) -> T:

@@ -19,7 +19,7 @@ RefNerfacto implementation.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Type, Optional, Tuple, List
+from typing import Type, List
 
 from nerfstudio.models.nerfacto import NerfactoModel, NerfactoModelConfig
 from nerfstudio.model_components.losses import CharbonnierLoss
@@ -45,7 +45,7 @@ class RefNerfactoModelConfig(NerfactoModelConfig):
     """Std of bottleneck noise."""
     bottleneck_noise_steps: int = 10000
     """Steps of applying bottleneck noise."""
-    deg_view: int = 4
+    levels: int = 5
     """Degree of encoding for viewdirs or refdirs."""
     use_reflections: bool = True
     """If True, use refdirs instead of viewdirs."""
@@ -69,13 +69,6 @@ class RefNerfactoModelConfig(NerfactoModelConfig):
     """Padding added to the RGB outputs."""
     predict_normals: bool = True
     """Whether to predict normals or not."""
-    use_bundle_adjust: bool = False
-    """Whether to bundle adjust (BARF)"""
-    coarse_to_fine_iters: Optional[Tuple[float, float]] = (0.0, 0.1)
-    """Iterations (as a percentage of total iterations) at which coarse to fine hash grid optimization starts and ends.
-    Linear interpolation between (start, end) and full activation of hash grid from end onwards."""
-    compute_hash_regularization: bool = True
-    """Whether to compute regularization on hash weights."""
     supervise_pred_normals_by_density: bool = True
     """Whether to supervise predicted normals by density."""
 
@@ -120,10 +113,11 @@ class RefNerfactoModel(NerfactoModel):
             appearance_embedding_dim=self.config.appearance_embed_dim,
             regularize_function=self.regularize_function,
             compute_hash_regularization=self.config.compute_hash_regularization,
+            compute_appearence_regularization=self.config.compute_appearence_regularization,
             bottleneck_noise=self.config.bottleneck_noise,
             bottleneck_noise_steps=self.config.bottleneck_noise_steps,
             bottleneck_layer_width=self.config.bottleneck_layer_width,
-            deg_view=self.config.deg_view,
+            levels=self.config.levels,
             use_reflections=self.config.use_reflections,
             use_ide_enc=self.config.use_ide_enc,
             use_pred_roughness=self.config.use_pred_roughness,

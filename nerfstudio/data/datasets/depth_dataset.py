@@ -144,7 +144,7 @@ class DepthDataset(InputDataset):
         repo = "isl-org/ZoeDepth"
         pseudodepth_model = torch_compile(
             torch.hub.load(repo, "ZoeD_NK", pretrained=True).to(device),
-            mode="reduce-overhead", backend="eager",
+            mode="reduce-overhead",
         )
 
         return pseudodepth_model

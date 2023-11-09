@@ -15,10 +15,10 @@
 """
 Code for embeddings.
 """
-
+from typing import Optional, Callable
 
 import torch
-from jaxtyping import Shaped
+from jaxtyping import Shaped, Int
 from torch import Tensor
 
 from nerfstudio.field_components.base_field_component import FieldComponent
@@ -53,3 +53,23 @@ class Embedding(FieldComponent):
             in_tensor: input tensor to process
         """
         return self.embedding(in_tensor)
+
+    def regularize_appearence(
+        self,
+        regularize_fn: Callable[[Tensor], Tensor] = torch.abs,
+        camera_indices: Optional[Int[Tensor, "num_trainable_cameras"]] = None,
+    ) -> Shaped[Tensor, "*batch output_dim"]:
+        """Additional regularisation
+
+        Args:
+            regularize_fn: function to regularize weights
+        """
+
+        weights = self.embedding.weight
+
+        # Apply regularize to unique indexes without repetition
+        if camera_indices is not None:
+            unique_camera_indices = torch.unique(camera_indices, sorted=False)
+            weights = weights[unique_camera_indices]
+
+        return regularize_fn(weights)

@@ -559,7 +559,7 @@ class VanillaDataManager(DataManager, Generic[TDataset]):
         )
 
     @torch_compile
-    def _next_train_compiled(self, image_batch):
+    def _next_train_compiled(self, image_batch: Dict):
         assert self.train_pixel_sampler is not None
         batch = self.train_pixel_sampler.sample(image_batch)
         ray_indices = batch["indices"]
@@ -570,12 +570,11 @@ class VanillaDataManager(DataManager, Generic[TDataset]):
         """Returns the next batch of data from the train dataloader."""
         self.train_count += 1
         image_batch = next(self.iter_train_image_dataloader)
-        assert self.train_pixel_sampler is not None
         assert isinstance(image_batch, dict)
         return self._next_train_compiled(image_batch)
-
+    
     @torch_compile
-    def _next_eval_compiled(self, image_batch):
+    def _next_eval_compiled(self, image_batch: Dict):
         assert self.eval_pixel_sampler is not None
         batch = self.eval_pixel_sampler.sample(image_batch)
         ray_indices = batch["indices"]
@@ -586,7 +585,6 @@ class VanillaDataManager(DataManager, Generic[TDataset]):
         """Returns the next batch of data from the eval dataloader."""
         self.eval_count += 1
         image_batch = next(self.iter_eval_image_dataloader)
-        assert self.eval_pixel_sampler is not None
         assert isinstance(image_batch, dict)
         return self._next_eval_compiled(image_batch)
 

@@ -67,6 +67,7 @@ class RAdamOptimizerConfig(OptimizerConfig):
 
     _target: Type = torch.optim.RAdam
     weight_decay: float = 0
+    decoupled_weight_decay: bool = True
     """The weight decay to use."""
 
 

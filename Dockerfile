@@ -34,7 +34,18 @@ ENV DEBIAN_FRONTEND=noninteractive \
     ## Set LD_LIBRARY_PATH for local libs (glog etc.)
     LD_LIBRARY_PATH="${LD_LIBRARY_PATH}:/usr/local/lib" \
     ## Set TCNN_CUDA_ARCHITECTURES for tinycudann installation
-    TCNN_CUDA_ARCHITECTURES=${CUDA_ARCHITECTURES}
+    TCNN_CUDA_ARCHITECTURES=${CUDA_ARCHITECTURES} \
+    ## Set makeflags for faster building
+    MAKEFLAGS=-j$(nproc) \
+    ## Insert to PATH CUDA bin dir 
+    PATH="/usr/local/cuda/bin:${PATH}" \
+    ## Insert to CPATH CUDA include dir 
+    CPATH="/usr/local/cuda/include:${CPATH}" \
+    ## Update torch_cuda_list for torch_scatter
+    ## See https://docs.nvidia.com/cuda/cuda-compiler-driver-nvcc/index.html#gpu-feature-list
+    TORCH_CUDA_ARCH_LIST="5.2 6.0 6.1 7.0 7.5 8.0 8.6+PTX" \
+    ## Update torch_nvcc_flags for torch_scatter
+    TORCH_NVCC_FLAGS="-Xfatbin -compress-all"
 
 # Install required apt packages and clear cache afterwards.
 RUN apt-get update && \
@@ -137,14 +148,22 @@ SHELL ["/bin/bash", "-c"]
 
 # Base packages installation
 ## Upgrade pip and install packages.
-RUN python3.10 -m pip install --upgrade pip setuptools pathtools promise pybind11 omegaconf ninja
+RUN python3.10 -m pip install \
+    --upgrade \
+        pip \
+        setuptools \
+        pathtools \
+        promise \
+        pybind11 \
+        omegaconf \
+        ninja
 
 ## Install pytorch and submodules
 RUN CUDA_VER=${CUDA_VERSION%.*} && CUDA_VER=${CUDA_VER//./} && python3.10 -m pip install \
-    torch==2.0.1+cu${CUDA_VER} \
+    torch==2.1.0+cu${CUDA_VER} \
     torchvision==0.15.2+cu${CUDA_VER} \
-    torch-scatter==2.1.1 \
-        --find-links https://data.pyg.org/whl/torch-2.0.1+cu${CUDA_VER}.html \
+    torch-scatter==2.1.2 \
+        --find-links https://data.pyg.org/whl/torch-2.1.0+${CUDA_VER}.html \
         --extra-index-url https://download.pytorch.org/whl/cu${CUDA_VER}
 
 ## Install tynyCUDNN (we need to set the target architectures as environment variable first).

@@ -121,6 +121,10 @@ class NerfactoModelConfig(ModelConfig):
     """Hash decay loss multiplier."""
     compute_hash_regularization: bool = False
     """Whether to compute regularization on hash weights."""
+    compute_appearence_regularization: bool = False
+    """Whether to compute regularization on appearence embeddings."""
+    appearence_decay_loss_mult: float = 0.00001
+    """Appearence decay loss multiplier."""
     use_proposal_weight_anneal: bool = True
     """Whether to use proposal weight annealing."""
     regularize_function: Literal["abs", "square"] = "square"
@@ -141,11 +145,11 @@ class NerfactoModelConfig(ModelConfig):
     """Whether to disable scene contraction or not."""
     use_gradient_scaling: bool = False
     """Use gradient scaler where the gradients are lower for points closer to the camera."""
-    bundle_adjustment_type: BundleAdjustmentType = BundleAdjustmentType.CAMP
+    bundle_adjustment_type: BundleAdjustmentType = BundleAdjustmentType.BAANGP
     """Type of bundle_adjustment."""
     use_bundle_adjust: bool = False
     """Whether to bundle adjust (BARF)"""
-    coarse_to_fine_iters: Optional[Tuple[float, float]] = (0.0, 0.3)
+    coarse_to_fine_iters: Optional[Tuple[float, float]] = (0.05, 0.5)
     """Iterations (as a percentage of total iterations) at which coarse to fine hash grid optimization starts and ends.
     Linear interpolation between (start, end) and full activation of hash grid from end onwards."""
     implementation: Literal["tcnn", "torch"] = "tcnn"
@@ -209,6 +213,7 @@ class NerfactoModel(Model):
             appearance_embedding_dim=self.config.appearance_embed_dim,
             regularize_function=self.regularize_function,
             compute_hash_regularization=self.config.compute_hash_regularization,
+            compute_appearence_regularization=self.config.compute_appearence_regularization,
             implementation=self.config.implementation,
         )
 
@@ -346,7 +351,7 @@ class NerfactoModel(Model):
         return callbacks
 
     def get_outputs(self, ray_bundle: RayBundle):
-        ray_samples, weights_list, ray_samples_list = self.proposal_sampler(
+        ray_samples, weights_list, ray_samples_list, density_list = self.proposal_sampler(
             ray_bundle,
             density_fns=self.density_fns,
         )
@@ -366,6 +371,7 @@ class NerfactoModel(Model):
         weights = ray_samples.get_weights(field_outputs[FieldHeadNames.DENSITY])
         weights_list.append(weights)
         ray_samples_list.append(ray_samples)
+        density_list.append(field_outputs[FieldHeadNames.DENSITY])
 
         rgb = self.renderer_rgb(rgb=field_outputs[FieldHeadNames.RGB], weights=weights)
         depth = self.renderer_depth(weights=weights, ray_samples=ray_samples)
@@ -374,6 +380,7 @@ class NerfactoModel(Model):
         outputs = {
             "rgb": rgb,
             "accumulation": accumulation,
+            "density_list": density_list,
             f"prop_depth_{self.config.num_proposal_iterations}": depth,
         }
 
@@ -392,6 +399,12 @@ class NerfactoModel(Model):
         if FieldHeadNames.SPECULAR_TINT in field_outputs:
             outputs["specular_tint"] = self.renderer_rgb(
                 rgb=field_outputs[FieldHeadNames.SPECULAR_TINT],
+                weights=weights,
+            )
+
+        if FieldHeadNames.SPECULAR_COLOR in field_outputs:
+            outputs["specular_color"] = self.renderer_rgb(
+                rgb=field_outputs[FieldHeadNames.SPECULAR_COLOR],
                 weights=weights,
             )
 
@@ -419,6 +432,9 @@ class NerfactoModel(Model):
                 ]
                 outputs["hash_decay"].append(field_outputs[FieldHeadNames.HASH_DECAY])
 
+            if self.config.compute_appearence_regularization:
+                outputs["appearance_decay_loss"] = field_outputs[FieldHeadNames.APPEARENCE_DECAY].mean()
+
             if self.config.predict_normals:
                 outputs["rendered_orientation_loss"] = orientation_loss(
                     weights.detach(), field_outputs[FieldHeadNames.NORMALS], ray_bundle.directions
@@ -434,14 +450,11 @@ class NerfactoModel(Model):
         elif self.vis_weights_dist:
             outputs["weights_list"] = [weights_prop.cpu() for weights_prop in weights_list]
             outputs["ray_steps_list"] = [
-                (ray_samples_prop.frustums.starts + ray_samples_prop.frustums.ends)
-                .div(2.0)
-                .cpu()
+                ray_samples_prop.frustums.get_steps().cpu()
                 for ray_samples_prop in ray_samples_list
             ]
             outputs["ray_length_list"] = [
-                (ray_samples_prop.frustums.starts - ray_samples_prop.frustums.ends)
-                .cpu()
+                ray_samples_prop.frustums.get_length().cpu()
                 for ray_samples_prop in ray_samples_list
             ]
 
@@ -483,7 +496,12 @@ class NerfactoModel(Model):
             loss_dict["distortion_loss"] = self.config.distortion_loss_mult * metrics_dict["distortion"]
 
             if self.config.compute_hash_regularization:
+                # hash encoding loss proposed in zip-nerf
                 loss_dict["hash_decay_loss"] = self.config.hash_decay_loss_mult * hash_decay_loss(outputs["hash_decay"])
+
+            if self.config.compute_appearence_regularization:
+                # appearence regularization loss for stable training
+                loss_dict["appearance_decay_loss"] = self.config.appearence_decay_loss_mult * outputs["appearance_decay_loss"]
 
             if self.config.predict_normals:
                 # orientation loss for computed normals

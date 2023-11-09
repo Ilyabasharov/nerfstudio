@@ -221,16 +221,16 @@ class IntrinsicOptimizer(nn.Module):
             pass
         elif "shift" in self.config.mode or "scale" in self.config.mode:
             if "scale" in self.config.mode:
-                fx *= self.scale_tf(self.intrinsic_opt_adjustment_scale[0])
-                fy *= self.scale_tf(self.intrinsic_opt_adjustment_scale[1])
-                cx *= self.scale_tf(self.intrinsic_opt_adjustment_scale[2])
-                cy *= self.scale_tf(self.intrinsic_opt_adjustment_scale[3])
+                fx = fx * self.scale_tf(self.intrinsic_opt_adjustment_scale[0])
+                fy = fy * self.scale_tf(self.intrinsic_opt_adjustment_scale[1])
+                cx = cx * self.scale_tf(self.intrinsic_opt_adjustment_scale[2])
+                cy = cy * self.scale_tf(self.intrinsic_opt_adjustment_scale[3])
 
             if "shift" in self.config.mode:
-                fx += self.intrinsic_opt_adjustment_shift[0]
-                fy += self.intrinsic_opt_adjustment_shift[1]
-                cx += self.intrinsic_opt_adjustment_shift[2]
-                cy += self.intrinsic_opt_adjustment_shift[3]
+                fx = fx + self.intrinsic_opt_adjustment_shift[0]
+                fy = fy + self.intrinsic_opt_adjustment_shift[1]
+                cx = cx + self.intrinsic_opt_adjustment_shift[2]
+                cy = cy + self.intrinsic_opt_adjustment_shift[3]
         else:
             assert_never(self.config.mode)
 

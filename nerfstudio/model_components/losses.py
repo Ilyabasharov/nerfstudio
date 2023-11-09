@@ -17,10 +17,10 @@ Collection of Losses.
 """
 
 from enum import Enum
-from typing import Literal, Optional, Tuple, List
+from typing import Literal, Optional, Tuple, List, Callable
 
 import torch
-from jaxtyping import Bool, Float
+from jaxtyping import Bool, Float, Bool
 from torch import Tensor, nn
 
 from nerfstudio.cameras.rays import RaySamples
@@ -30,11 +30,10 @@ from nerfstudio.utils.math import (
     sorted_interp_quad,
     blur_stepfun,
 )
+from nerfstudio.utils.misc import Numeric
 
 L1Loss = nn.L1Loss
 MSELoss = nn.MSELoss
-
-LOSSES = {"L1": L1Loss, "MSE": MSELoss}
 
 EPS = 1.0e-7
 
@@ -43,13 +42,6 @@ URF_SIGMA_SCALE_FACTOR = 3.0
 
 # Depth ranking loss
 FORCE_PSEUDODEPTH_LOSS = False
-
-
-class DepthLossType(Enum):
-    """Types of depth losses for depth supervision."""
-
-    DS_NERF = 1
-    URF = 2
 
 
 def outer(
@@ -255,120 +247,311 @@ def pred_normal_loss(
     return (weights[..., 0] * (1.0 - torch.sum(normals * pred_normals, dim=-1))).sum(dim=-1)
 
 
-def ds_nerf_depth_loss(
-    weights: Float[Tensor, "*batch num_samples 1"],
-    termination_depth: Float[Tensor, "*batch 1"],
-    steps: Float[Tensor, "*batch num_samples 1"],
-    lengths: Float[Tensor, "*batch num_samples 1"],
-    sigma: Float[Tensor, "0"],
-) -> Float[Tensor, "*batch 1"]:
-    """Depth loss from Depth-supervised NeRF (Deng et al., 2022).
-
+class iMAPLoss(nn.Module):
+    """iMAP implementation of depth loss.
+    https://arxiv.org/abs/2103.12352
+    
     Args:
-        weights: Weights predicted for each sample.
-        termination_depth: Ground truth depth of rays.
-        steps: Sampling distances along rays.
-        lengths: Distances between steps.
-        sigma: Uncertainty around depth values.
-    Returns:
-        Depth loss scalar.
+        is_euclidean: Whether ground truth depths corresponds to normalized direction vectors.
     """
-    depth_mask = termination_depth > 0
+    def __init__(
+        self,
+        is_euclidean: bool = False,
+    ) -> None:
+        super().__init__()
+        self.is_euclidean = is_euclidean
 
-    loss = -torch.log(weights + EPS) * torch.exp(-((steps - termination_depth[:, None]) ** 2) / (2 * sigma)) * lengths
-    loss = loss.sum(-2) * depth_mask
-    return torch.mean(loss)
+    def forward(
+        self,
+        termination_depth: Float[Tensor, "*batch 1"],
+        predicted_depth: Float[Tensor, "*batch 1"],
+        directions_norm: Float[Tensor, "*batch 1"],
+        *args,
+        **kwargs,
+    ) -> Float[Tensor, "0"]:
+        """Args:
+            weights: Weights predicted for each sample.
+            ray_samples: Samples along rays corresponding to weights.
+            termination_depth: Ground truth depth of rays.
+            predicted_depth: Depth prediction from the network.
+            sigma: Uncertainty around depth value.
+            directions_norm: Norms of ray direction vectors in the camera frame.
+        """
+        if self.is_euclidean:
+            termination_depth = termination_depth * directions_norm
 
+        depth_mask = termination_depth > 0
 
-def urban_radiance_field_depth_loss(
-    weights: Float[Tensor, "*batch num_samples 1"],
-    termination_depth: Float[Tensor, "*batch 1"],
-    predicted_depth: Float[Tensor, "*batch 1"],
-    steps: Float[Tensor, "*batch num_samples 1"],
-    sigma: Float[Tensor, "0"],
-) -> Float[Tensor, "*batch 1"]:
-    """Lidar losses from Urban Radiance Fields (Rematas et al., 2022).
+        # Expected depth loss
+        expected_depth_loss = (termination_depth - predicted_depth) ** 2
+
+        return (expected_depth_loss * depth_mask).mean()
+
+    
+class DSNeRFLoss(iMAPLoss):
+    """Depth loss from Depth-supervised NeRF (Deng et al., 2022)
+    https://arxiv.org/abs/2107.02791
+    """
+
+    def forward(
+        self,
+        weights: Float[Tensor, "*batch num_samples 1"],
+        ray_samples: RaySamples,
+        termination_depth: Float[Tensor, "*batch 1"],
+        directions_norm: Float[Tensor, "*batch 1"],
+        sigma: Float[Tensor, "0"],
+        *args,
+        **kwargs,
+    ) -> Float[Tensor, "0"]:
+        """Args:
+            weights: Weights predicted for each sample.
+            ray_samples: Samples along rays corresponding to weights.
+            termination_depth: Ground truth depth of rays.
+            directions_norm: Norms of ray direction vectors in the camera frame.
+            sigma: Uncertainty around depth values.
+        """
+        if self.is_euclidean:
+            termination_depth = termination_depth * directions_norm
+
+        steps = ray_samples.frustums.get_steps()
+        lengths = ray_samples.frustums.get_length()
+
+        depth_mask = termination_depth > 0
+        
+        # Line of sight loss
+        termination_depth = termination_depth[:, None]
+        loss = -(weights + EPS).log() * (-((steps - termination_depth) ** 2) / (2 * sigma)).exp() * lengths
+        loss = loss.sum(-2) * depth_mask
+
+        return loss.mean()
+        
+
+class URFLoss(iMAPLoss):
+    """Lidar losses from Urban Radiance Fields (Rematas et al., 2022)
+    with `line_of_sight_near_distribution` as normal distribution.
+    https://urban-radiance-fields.github.io/images/go_urf.pdf
+    """
+
+    @staticmethod
+    def line_of_sight_near_distribution(
+        steps: Float[Tensor, "*batch num_samples 1"],
+        sigma: Float[Tensor, "0"],
+        termination_depth: Float[Tensor, "*batch 1 1"],
+    ) -> Float[Tensor, "*batch 1 1"]:
+        """Generates target distribution in line of sight near zone.
+        Args:
+            steps: Middle points in ray samples
+            termination_depth: Ground truth depth of rays.
+            sigma: Uncertainty around depth value.
+        """
+        
+        target_distribution = torch.distributions.normal.Normal(
+            loc=0.0, scale=sigma / URF_SIGMA_SCALE_FACTOR,
+        ).log_prob(steps - termination_depth).exp_()
+
+        return target_distribution
+    
+    def compute_line_of_sight_near_loss(
+        self,
+        steps: Float[Tensor, "*batch num_samples 1"],
+        sigma: Float[Tensor, "0"],
+        termination_depth: Float[Tensor, "*batch 1 1"],
+        line_of_sight_loss_near_mask: Bool[Tensor, "*batch num_samples 1"],
+        weights: Float[Tensor, "*batch num_samples 1"],
+    ) -> Float[Tensor, "*batch  1"]:
+        """Computes line of sight loss in near zone.
+        Args:
+            steps: Middle points in ray samples
+            termination_depth: Ground truth depth of rays.
+            sigma: Uncertainty around depth value.
+            line_of_sight_loss_near_mask: Mask indicates where target dist located
+            weights: Weights predicted by neural network
+        """
+
+        target_distribution = self.line_of_sight_near_distribution(
+            steps=steps, sigma=sigma,
+            termination_depth=termination_depth,
+        )  # [bs num_samples 1]
+
+        # correction for discrete variant
+        div_value = (target_distribution * line_of_sight_loss_near_mask).sum(-2, keepdim=True)
+        target_distribution = torch.where(
+            line_of_sight_loss_near_mask,
+            target_distribution / div_value,
+            0.,
+        )
+
+        # Near step, see eq. 16
+        line_of_sight_loss_near = (weights - target_distribution) ** 2
+        line_of_sight_loss_near = (line_of_sight_loss_near_mask * line_of_sight_loss_near).sum(-2)
+
+        return line_of_sight_loss_near
+        
+    def forward(
+        self,
+        weights: Float[Tensor, "*batch num_samples 1"],
+        ray_samples: RaySamples,
+        termination_depth: Float[Tensor, "*batch 1"],
+        predicted_depth: Float[Tensor, "*batch 1"],
+        sigma: Float[Tensor, "0"],
+        directions_norm: Float[Tensor, "*batch 1"],
+        density: Float[Tensor, "*batch num_samples 1"],
+    ) -> Float[Tensor, "0"]:
+        """Args:
+            weights: Weights predicted for each sample.
+            ray_samples: Samples along rays corresponding to weights.
+            termination_depth: Ground truth depth of rays.
+            predicted_depth: Depth prediction from the network.
+            sigma: Uncertainty around depth value.
+            directions_norm: Norms of ray direction vectors in the camera frame.
+        """
+
+        if self.is_euclidean:
+            termination_depth = termination_depth * directions_norm
+
+        steps = ray_samples.frustums.get_steps()
+
+        depth_mask = termination_depth > 0
+
+        # Expected depth loss
+        expected_depth_loss = (termination_depth - predicted_depth) ** 2
+
+        # Line of sight losses
+        termination_depth = termination_depth[:, None]
+
+        line_of_sight_loss_near_mask = torch.logical_and(
+            steps <= termination_depth + sigma,
+            steps >= termination_depth - sigma,
+        )  # [batch num_samples 1]
+
+        # # Near step, see eq. 16
+        line_of_sight_loss_near = self.compute_line_of_sight_near_loss(
+            steps=steps,
+            sigma=sigma,
+            termination_depth=termination_depth,
+            line_of_sight_loss_near_mask=line_of_sight_loss_near_mask,
+            weights=weights,
+        )  # [batch 1]
+
+        # Empty & dist step, see eq. 17 & 18
+        line_of_sight_loss_empty_dist_mask = torch.logical_not(line_of_sight_loss_near_mask)
+        line_of_sight_loss_empty_dist = (line_of_sight_loss_empty_dist_mask * weights ** 2).sum(-2)
+
+        line_of_sight_loss = line_of_sight_loss_empty_dist + line_of_sight_loss_near
+
+        loss = (expected_depth_loss + line_of_sight_loss) * depth_mask
+        return loss.mean()
+    
+
+class PowURFLoss(URFLoss):
+    """Lidar losses from Urban Radiance Fields (Rematas et al., 2022)
+    with modification `line_of_sight_near_distribution` as pascal distribution.
     https://urban-radiance-fields.github.io/images/go_urf.pdf
 
     Args:
-        weights: Weights predicted for each sample.
-        termination_depth: Ground truth depth of rays.
-        predicted_depth: Depth prediction from the network.
-        steps: Sampling distances along rays.
-        sigma: Uncertainty around depth values.
-    Returns:
-        Depth loss scalar.
-    """
-    depth_mask = termination_depth > 0
-
-    # Expected depth loss
-    expected_depth_loss = (termination_depth - predicted_depth) ** 2
-
-    # Line of sight losses
-    termination_depth = termination_depth[:, None]
-
-    target_distribution = torch.distributions.normal.Normal(
-        loc=0.0, scale=sigma / URF_SIGMA_SCALE_FACTOR,
-    ).log_prob(steps - termination_depth).exp_()
-
-    # Fix error when Normal distibution is not sum up to one
-    target_distribution /= target_distribution.sum(-2, keepdim=True)
-
-    line_of_sight_loss_near_mask = torch.logical_and(
-        steps <= termination_depth + sigma,
-        steps >= termination_depth - sigma,
-    )
-
-    # Near step, see eq. 16
-    line_of_sight_loss_near = (weights - target_distribution) ** 2
-    line_of_sight_loss_near = (line_of_sight_loss_near_mask * line_of_sight_loss_near).sum(-2)
-
-    # Empty & dist step, see eq. 17 & 18
-    line_of_sight_loss_empty_dist_mask = torch.logical_not(line_of_sight_loss_near_mask)
-    line_of_sight_loss_empty_dist = (line_of_sight_loss_empty_dist_mask * weights**2).sum(-2)
-    line_of_sight_loss = line_of_sight_loss_near + line_of_sight_loss_empty_dist
-
-    loss = (expected_depth_loss + line_of_sight_loss) * depth_mask
-    return torch.mean(loss)
-
-
-def depth_loss(
-    weights: Float[Tensor, "*batch num_samples 1"],
-    ray_samples: RaySamples,
-    termination_depth: Float[Tensor, "*batch 1"],
-    predicted_depth: Float[Tensor, "*batch 1"],
-    sigma: Float[Tensor, "0"],
-    directions_norm: Float[Tensor, "*batch 1"],
-    is_euclidean: bool,
-    depth_loss_type: DepthLossType,
-) -> Float[Tensor, "0"]:
-    """Implementation of depth losses.
-
-    Args:
-        weights: Weights predicted for each sample.
-        ray_samples: Samples along rays corresponding to weights.
-        termination_depth: Ground truth depth of rays.
-        predicted_depth: Depth prediction from the network.
-        sigma: Uncertainty around depth value.
-        directions_norm: Norms of ray direction vectors in the camera frame.
         is_euclidean: Whether ground truth depths corresponds to normalized direction vectors.
-        depth_loss_type: Type of depth loss to apply.
-
-    Returns:
-        Depth loss scalar.
+        freqs: Min / Max values in frequency
+        mask_scale: Min / Max values in scales
+        regularize_fn: Regularize function
     """
-    if not is_euclidean:
-        termination_depth = termination_depth * directions_norm
-    steps = (ray_samples.frustums.starts + ray_samples.frustums.ends) / 2
 
-    if depth_loss_type == DepthLossType.DS_NERF:
-        lengths = ray_samples.frustums.ends - ray_samples.frustums.starts
-        return ds_nerf_depth_loss(weights, termination_depth, steps, lengths, sigma)
+    def __init__(
+        self,
+        is_euclidean: bool,
+        freqs: Tuple[Numeric, Numeric] = (2, 10),
+        mask_scale: Tuple[Numeric, Numeric] = (2, 10),
+        regularize_fn: Callable[[Tensor], Tensor] = torch.square,
+    ) -> None:
+        super().__init__(is_euclidean=is_euclidean)
 
-    if depth_loss_type == DepthLossType.URF:
-        return urban_radiance_field_depth_loss(weights, termination_depth, predicted_depth, steps, sigma)
+        # TODO
+        self.freqs = freqs
+        self.mask_scale = mask_scale
+        self.regularize_fn = regularize_fn
 
-    raise NotImplementedError("Provided depth loss type not implemented.")
+        self.current_freq = freqs[0]
+        self.current_mask_scale = mask_scale[0]
+    
+    def forward(
+        self,
+        weights: Float[Tensor, "*batch num_samples 1"],
+        ray_samples: RaySamples,
+        termination_depth: Float[Tensor, "*batch 1"],
+        predicted_depth: Float[Tensor, "*batch 1"],
+        sigma: Float[Tensor, "0"],
+        directions_norm: Float[Tensor, "*batch 1"],
+        density: Float[Tensor, "*batch num_samples 1"],
+    ) -> Float[Tensor, "0"]:
+        """Args:
+            weights: Weights predicted for each sample.
+            ray_samples: Samples along rays corresponding to weights.
+            termination_depth: Ground truth depth of rays.
+            predicted_depth: Depth prediction from the network.
+            sigma: Uncertainty around depth value.
+            directions_norm: Norms of ray direction vectors in the camera frame.
+        """
+
+        if self.is_euclidean:
+            termination_depth = termination_depth * directions_norm
+
+        steps = ray_samples.frustums.get_steps()
+
+        depth_mask = termination_depth > 0
+
+        # Expected depth loss
+        expected_depth_loss = (termination_depth - predicted_depth) ** 2
+
+        # Line of sight losses
+        termination_depth = termination_depth[:, None]
+
+        focal_mask = self.compute_focal_mask(steps=steps, termination_depth=termination_depth)
+
+        # Empty step
+        line_of_sight_loss_empty_mask = steps <= termination_depth - sigma
+        line_of_sight_loss_empty = (line_of_sight_loss_empty_mask * focal_mask * self.regularize_fn(density)).sum(-2)
+
+        # Dist step
+        line_of_sight_loss_dist_mask = steps >= termination_depth + sigma
+        transmittance = ray_samples.get_transmittance(density, transmittance_only=True)
+        line_of_sight_loss_dist = (line_of_sight_loss_dist_mask * focal_mask * self.regularize_fn(transmittance)).sum(-2)
+
+        line_of_sight_loss_near_mask = torch.logical_and(
+            steps <= termination_depth + sigma,
+            steps >= termination_depth - sigma,
+        )  # [batch num_samples 1]
+
+        # Near step, see eq. 16
+        line_of_sight_loss_near = self.compute_line_of_sight_near_loss(
+            steps=steps,
+            sigma=sigma,
+            termination_depth=termination_depth,
+            line_of_sight_loss_near_mask=line_of_sight_loss_near_mask,
+            weights=weights,
+        )  # [batch 1]
+
+        line_of_sight_loss = line_of_sight_loss_empty + line_of_sight_loss_dist + line_of_sight_loss_near
+
+        loss = (expected_depth_loss + line_of_sight_loss) * depth_mask
+        return loss.mean()
+    
+    def compute_focal_mask(
+        self,
+        steps: Float[Tensor, "*batch num_samples 1"],
+        termination_depth: Float[Tensor, "*batch 1 1"],
+    ) -> Float[Tensor, "*batch num_samples 1"]:
+        
+        focal_mask = self.current_mask_scale * self.regularize_fn(steps - termination_depth)
+
+        return focal_mask
+
+
+class DepthLossType(Enum):
+    """Types of depth losses for depth supervision."""
+
+    DS_NERF = DSNeRFLoss
+    URF = URFLoss
+    iMAP = iMAPLoss
+    POWURF = PowURFLoss
 
 
 def hash_decay_loss(

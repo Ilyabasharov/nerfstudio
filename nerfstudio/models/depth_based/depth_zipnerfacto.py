@@ -37,10 +37,10 @@ class DepthZipNerfactoModelConfig(ZipNerfactoModelConfig, DepthNerfactoModelConf
 
 
 class DepthZipNerfactoModel(ZipNerfactoModel, DepthNerfactoModel):
-    """Depth ZipRefNerfacto model.
+    """Depth ZipNerfacto model.
 
     Args:
-        config: DepthZipRefNerfactoModel configuration to instantiate model
+        config: DepthZipNerfactoModel configuration to instantiate model
     """
 
     config: DepthZipNerfactoModelConfig

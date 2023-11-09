@@ -26,70 +26,199 @@ from torch import Tensor
 from nerfstudio.utils.misc import torch_compile
 
 
+@torch_compile(dynamic=True, mode="reduce-overhead")
 def components_from_spherical_harmonics(
-    levels: int, directions: Float[Tensor, "*batch 3"]
+    levels: int,
+    directions: Float[Tensor, "*batch 3"],
 ) -> Float[Tensor, "*batch components"]:
     """
     Returns value for each component of spherical harmonics.
+    # Based on https://github.com/NVlabs/tiny-cuda-nn/blob/8575542682cb67cddfc748cc3d3cfc12593799aa/include/include/tiny-cuda-nn/encodings/spherical_harmonics.h#L76
 
     Args:
         levels: Number of spherical harmonic levels to compute.
         directions: Spherical harmonic coefficients
     """
-    num_components = levels**2
-    components = directions.new_zeros((*directions.shape[:-1], num_components))
+    # torch.compile change dtype even if the standard method returns int 
+    num_components = int(pow(levels, 2))
 
-    assert 1 <= levels <= 5, f"SH levels must be in [1,4], got {levels}"
+    # use transpose matrix to inference faster
+    # at the end, transpose again
+    components = directions.new_zeros((num_components, *directions.shape[:-1]))
+
+    assert 1 <= levels <= 8, f"SH levels must be in [1,8], got {levels}"
     assert directions.shape[-1] == 3, f"Direction input should have three dimensions. Got {directions.shape[-1]}"
 
     x = directions[..., 0]
     y = directions[..., 1]
     z = directions[..., 2]
 
-    xx = x**2
-    yy = y**2
-    zz = z**2
-
     # l0
-    components[..., 0] = 0.28209479177387814
+    components[0] = 0.28209479177387814
 
     # l1
     if levels > 1:
-        components[..., 1] = 0.4886025119029199 * y
-        components[..., 2] = 0.4886025119029199 * z
-        components[..., 3] = 0.4886025119029199 * x
+        components[1] = -0.48860251190291987 * y
+        components[2] = 0.48860251190291987 * z
+        components[3] = -0.48860251190291987 * x
 
     # l2
     if levels > 2:
-        components[..., 4] = 1.0925484305920792 * x * y
-        components[..., 5] = 1.0925484305920792 * y * z
-        components[..., 6] = 0.9461746957575601 * zz - 0.31539156525251999
-        components[..., 7] = 1.0925484305920792 * x * z
-        components[..., 8] = 0.5462742152960396 * (xx - yy)
+        # precompute 
+        xy = x * y
+        xz = x * z
+        yz = y * z
+        x2 = x * x
+        y2 = y * y
+        z2 = z * z
+
+        components[4] = 1.0925484305920792 * xy
+        components[5] = -1.0925484305920792 * yz
+        components[6] = 0.94617469575755997 * z2 - 0.31539156525251999
+        components[7] = -1.0925484305920792 * xz
+        components[8] = 0.54627421529603959 * x2 - 0.54627421529603959 * y2
 
     # l3
     if levels > 3:
-        components[..., 9] = 0.5900435899266435 * y * (3 * xx - yy)
-        components[..., 10] = 2.890611442640554 * x * y * z
-        components[..., 11] = 0.4570457994644658 * y * (5 * zz - 1)
-        components[..., 12] = 0.3731763325901154 * z * (5 * zz - 3)
-        components[..., 13] = 0.4570457994644658 * x * (5 * zz - 1)
-        components[..., 14] = 1.445305721320277 * z * (xx - yy)
-        components[..., 15] = 0.5900435899266435 * x * (xx - 3 * yy)
+        # precompute
+        xyz = xy * z
+
+        components[9] = 0.59004358992664352 * y * (-3.0 * x2 + y2)
+        components[10] = 2.8906114426405538 * xyz
+        components[11] = 0.45704579946446572 * y * (1.0 - 5.0 * z2)
+        components[12] = 0.3731763325901154 * z * (5.0 * z2 - 3.0)
+        components[13] = 0.45704579946446572 * x * (1.0 - 5.0 * z2)
+        components[14] = 1.4453057213202769 * z * (x2 - y2)
+        components[15] = 0.59004358992664352 * x * (-x2 + 3.0 * y2)
 
     # l4
     if levels > 4:
-        components[..., 16] = 2.5033429417967046 * x * y * (xx - yy)
-        components[..., 17] = 1.7701307697799304 * y * z * (3 * xx - yy)
-        components[..., 18] = 0.9461746957575601 * x * y * (7 * zz - 1)
-        components[..., 19] = 0.6690465435572892 * y * z * (7 * zz - 3)
-        components[..., 20] = 0.10578554691520431 * (35 * zz * zz - 30 * zz + 3)
-        components[..., 21] = 0.6690465435572892 * x * z * (7 * zz - 3)
-        components[..., 22] = 0.47308734787878004 * (xx - yy) * (7 * zz - 1)
-        components[..., 23] = 1.7701307697799304 * x * z * (xx - 3 * yy)
-        components[..., 24] = 0.6258357354491761 * (xx * (xx - 3 * yy) - yy * (3 * xx - yy))
+        # precompute
+        x4 = x2 * x2
+        y4 = y2 * y2
+        z4 = z2 * z2
 
-    return components
+        components[16] = 2.5033429417967046 * xy * (x2 - y2)
+        components[17] = 1.7701307697799304 * yz * (-3.0 * x2 + y2)
+        components[18] = 0.94617469575756008 * xy * (7.0 * z2 - 1.0)
+        components[19] = 0.66904654355728921 * yz * (3.0 - 7.0 * z2)
+        components[20] = (
+            -3.1735664074561294 * z2 + 3.7024941420321507 * z4 + 0.31735664074561293
+        )
+        components[21] = 0.66904654355728921 * xz * (3.0 - 7.0 * z2)
+        components[22] = 0.47308734787878004 * (x2 - y2) * (7.0 * z2 - 1.0)
+        components[23] = 1.7701307697799304 * xz * (-x2 + 3.0 * y2)
+        components[24] = (
+            -3.7550144126950569 * x2 * y2
+            + 0.62583573544917614 * x4
+            + 0.62583573544917614 * y4
+        )
+
+    # l5
+    if levels > 5:
+        components[25] = 0.65638205684017015 * y * (10.0 * x2 * y2 - 5.0 * x4 - y4)
+        components[26] = 8.3026492595241645 * xyz * (x2 - y2)
+        components[27] = -0.48923829943525038 * y * (3.0 * x2 - y2) * (9.0 * z2 - 1.0)
+        components[28] = 4.7935367849733241 * xyz * (3.0 * z2 - 1.0)
+        components[29] = 0.45294665119569694 * y * (14.0 * z2 - 21.0 * z4 - 1.0)
+        components[30] = 0.1169503224534236 * z * (-70.0 * z2 + 63.0 * z4 + 15.0)
+        components[31] = 0.45294665119569694 * x * (14.0 * z2 - 21.0 * z4 - 1.0)
+        components[32] = 2.3967683924866621 * z * (x2 - y2) * (3.0 * z2 - 1.0)
+        components[33] = -0.48923829943525038 * x * (x2 - 3.0 * y2) * (9.0 * z2 - 1.0)
+        components[34] = 2.0756623148810411 * z * (-6.0 * x2 * y2 + x4 + y4)
+        components[35] = 0.65638205684017015 * x * (10.0 * x2 * y2 - x4 - 5.0 * y4)
+
+     # l6
+    if levels > 6:
+        # precompute
+        x6 = x4 * x2
+        y6 = y4 * y2
+        z6 = z4 * z2
+
+        components[36] = 1.3663682103838286 * xy * (-10.0 * x2 * y2 + 3.0 * x4 + 3.0 * y4)
+        components[37] = 2.3666191622317521 * yz * (10.0 * x2 * y2 - 5.0 * x4 - y4)
+        components[38] = 2.0182596029148963 * xy * (x2 - y2) * (11.0 * z2 - 1.0)
+        components[39] = -0.92120525951492349 * yz * (3.0 * x2 - y2) * (11.0 * z2 - 3.0)
+        components[40] = 0.92120525951492349 * xy * (-18.0 * z2 + 33.0 * z4 + 1.0)
+        components[41] = 0.58262136251873131 * yz * (30.0 * z2 - 33.0 * z4 - 5.0)
+        components[42] = (
+            6.6747662381009842 * z2
+            - 20.024298714302954 * z4
+            + 14.684485723822165 * z6
+            - 0.31784601133814211
+        )
+        components[43] = 0.58262136251873131 * xz * (30.0 * z2 - 33.0 * z4 - 5.0)
+        components[44] = (
+            0.46060262975746175
+            * (x2 - y2)
+            * (11.0 * z2 * (3.0 * z2 - 1.0) - 7.0 * z2 + 1.0)
+        )
+        components[45] = -0.92120525951492349 * xz * (x2 - 3.0 * y2) * (11.0 * z2 - 3.0)
+        components[46] = 0.50456490072872406 * (11.0 * z2 - 1.0) * (-6.0 * x2 * y2 + x4 + y4)
+        components[47] = 2.3666191622317521 * xz * (10.0 * x2 * y2 - x4 - 5.0 * y4)
+        components[48] = (
+            10.247761577878714 * x2 * y4
+            - 10.247761577878714 * x4 * y2
+            + 0.6831841051919143 * x6
+            - 0.6831841051919143 * y6
+        )
+
+     # l7
+    if levels > 7:
+        components[49] = (
+            0.70716273252459627 * y * (-21.0 * x2 * y4 + 35.0 * x4 * y2 - 7.0 * x6 + y6)
+        )
+        components[50] = 5.2919213236038001 * xyz * (-10.0 * x2 * y2 + 3.0 * x4 + 3.0 * y4)
+        components[51] = (
+            -0.51891557872026028
+            * y
+            * (13.0 * z2 - 1.0)
+            * (-10.0 * x2 * y2 + 5.0 * x4 + y4)
+        )
+        components[52] = 4.1513246297620823 * xyz * (x2 - y2) * (13.0 * z2 - 3.0)
+        components[53] = (
+            -0.15645893386229404
+            * y
+            * (3.0 * x2 - y2)
+            * (13.0 * z2 * (11.0 * z2 - 3.0) - 27.0 * z2 + 3.0)
+        )
+        components[54] = 0.44253269244498261 * xyz * (-110.0 * z2 + 143.0 * z4 + 15.0)
+        components[55] = (
+            0.090331607582517306 * y * (-135.0 * z2 + 495.0 * z4 - 429.0 * z6 + 5.0)
+        )
+        components[56] = (
+            0.068284276912004949 * z * (315.0 * z2 - 693.0 * z4 + 429.0 * z6 - 35.0)
+        )
+        components[57] = (
+            0.090331607582517306 * x * (-135.0 * z2 + 495.0 * z4 - 429.0 * z6 + 5.0)
+        )
+        components[58] = (
+            0.07375544874083044
+            * z
+            * (x2 - y2)
+            * (143.0 * z2 * (3.0 * z2 - 1.0) - 187.0 * z2 + 45.0)
+        )
+        components[59] = (
+            -0.15645893386229404
+            * x
+            * (x2 - 3.0 * y2)
+            * (13.0 * z2 * (11.0 * z2 - 3.0) - 27.0 * z2 + 3.0)
+        )
+        components[60] = (
+            1.0378311574405206 * z * (13.0 * z2 - 3.0) * (-6.0 * x2 * y2 + x4 + y4)
+        )
+        components[61] = (
+            -0.51891557872026028
+            * x
+            * (13.0 * z2 - 1.0)
+            * (-10.0 * x2 * y2 + x4 + 5.0 * y4)
+        )
+        components[62] = 2.6459606618019 * z * (15.0 * x2 * y4 - 15.0 * x4 * y2 + x6 - y6)
+        components[63] = (
+            0.70716273252459627 * x * (-35.0 * x2 * y4 + 21.0 * x4 * y2 - x6 + 7.0 * y6)
+        )
+
+    return components.T
 
 
 @dataclass
@@ -105,6 +234,7 @@ class Gaussians:
     cov: Float[Tensor, "*batch dim dim"]
 
 
+@torch_compile
 def compute_3d_gaussian(
     directions: Float[Tensor, "*batch 3"],
     means: Float[Tensor, "*batch 3"],
@@ -133,6 +263,7 @@ def compute_3d_gaussian(
     return Gaussians(mean=means, cov=cov)
 
 
+@torch_compile
 def cylinder_to_gaussian(
     origins: Float[Tensor, "*batch 3"],
     directions: Float[Tensor, "*batch 3"],
@@ -158,6 +289,7 @@ def cylinder_to_gaussian(
     return compute_3d_gaussian(directions, means, dir_variance, radius_variance)
 
 
+@torch_compile
 def conical_frustum_to_gaussian(
     origins: Float[Tensor, "*batch 3"],
     directions: Float[Tensor, "*batch 3"],
@@ -287,8 +419,8 @@ def multisampled_frustum_to_gaussian(
     return Gaussians(mean=means, cov=stds)
 
 
-@torch_compile(dynamic=True, mode="reduce-overhead", backend="eager")
-def expected_sin(x_means: torch.Tensor, x_vars: torch.Tensor) -> torch.Tensor:
+@torch_compile(dynamic=True, mode="reduce-overhead")
+def expected_sin(x_means: Tensor, x_vars: Tensor) -> Tensor:
     """Computes the expected value of sin(y) where y ~ N(x_means, x_vars)
 
     Args:
@@ -302,14 +434,14 @@ def expected_sin(x_means: torch.Tensor, x_vars: torch.Tensor) -> torch.Tensor:
     return torch.exp(-0.5 * x_vars) * torch.sin(x_means)
 
 
-@torch_compile(dynamic=True, mode="reduce-overhead", backend="eager")
+@torch_compile(dynamic=True, mode="reduce-overhead")
 def intersect_aabb(
-    origins: torch.Tensor,
-    directions: torch.Tensor,
-    aabb: torch.Tensor,
+    origins: Tensor,
+    directions: Tensor,
+    aabb: Tensor,
     max_bound: float = 1e10,
     invalid_value: float = 1e10,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> Tuple[Tensor, Tensor]:
     """
     Implementation of ray intersection with AABB box
 
@@ -431,8 +563,12 @@ def normalized_depth_scale_and_shift(
     return scale, shift
 
 
-@torch_compile(dynamic=True, mode="reduce-overhead", backend="eager")
-def power_fn(x: torch.Tensor, lam: float = -1.5, max_bound: float = 1e10) -> torch.Tensor:
+@torch_compile(dynamic=True)
+def power_fn(
+    x: Tensor,
+    lam: float = -1.5,
+    max_bound: float = 1e10,
+) -> Tensor:
     """Power transformation function from Eq. 4 in ZipNeRF paper."""
 
     if lam == 1:
@@ -450,13 +586,13 @@ def power_fn(x: torch.Tensor, lam: float = -1.5, max_bound: float = 1e10) -> tor
     return (lam_1 / lam) * ((x / lam_1 + 1) ** lam - 1)
 
 
-@torch_compile(dynamic=True, mode="reduce-overhead", backend="inductor")
+@torch_compile(dynamic=True)
 def inv_power_fn(
-    x: torch.Tensor,
+    x: Tensor,
     lam: float = -1.5,
     eps: float = 1e-10,
     max_bound: float = 1e10,
-) -> torch.Tensor:
+) -> Tensor:
     """Inverse power transformation function from Eq. 4 in ZipNeRF paper."""
 
     if lam == 1:
@@ -474,8 +610,8 @@ def inv_power_fn(
     return ((x * lam / lam_1 + 1).clamp_min(eps) ** (1 / lam) - 1) * lam_1
 
 
-@torch_compile(dynamic=True, mode="reduce-overhead", backend="eager")
-def erf_approx(x: torch.Tensor) -> torch.Tensor:
+@torch_compile(dynamic=True, mode="reduce-overhead")
+def erf_approx(x: Tensor) -> Tensor:
     """Error function approximation proposed in ZipNeRF paper (Eq. 11)."""
     return torch.sign(x) * torch.sqrt(1 - torch.exp(-4 / torch.pi * x**2))
 
@@ -493,13 +629,6 @@ def grid_scale(level: int, log2_per_level_scale: float, base_resolution: int) ->
 
 def grid_resolution(scale: float) -> int:
     return math.ceil(scale) + 1
-
-
-def powi(base: int, exponent: int) -> int:
-    result: int = 1
-    for _ in range(exponent):
-        result *= base
-    return result
 
 
 def next_multiple(val: int, divisor: int) -> int:
@@ -527,8 +656,8 @@ def sph_harm_coeff(l, m, k):
         / (4.0 * math.pi * math.factorial(l + m))) * assoc_legendre_coeff(l, m, k)
 
 
-@torch_compile(dynamic=True, mode="reduce-overhead", backend="eager")
-def reflect(viewdirs: torch.Tensor, normals: torch.Tensor) -> torch.Tensor:
+@torch_compile(dynamic=True, mode="reduce-overhead")
+def reflect(viewdirs: Tensor, normals: Tensor) -> Tensor:
     """Reflect view directions about normals.
 
     The reflection of a vector v about a unit vector n is a vector u such that
@@ -547,11 +676,13 @@ def reflect(viewdirs: torch.Tensor, normals: torch.Tensor) -> torch.Tensor:
     )
 
 
-@torch_compile(dynamic=True, mode="reduce-overhead", backend="eager")
-def linear_to_srgb(
-    linear: torch.Tensor,
-) -> torch.Tensor:
-    """Assumes `linear` is in [0, 1], see https://en.wikipedia.org/wiki/SRGB."""
+@torch_compile(dynamic=True, mode="reduce-overhead")
+def linear_rgb_to_srgb(
+    linear: Tensor,
+) -> Tensor:
+    """Convert a linear RGB image to sRGB. Used in colorspace conversions.
+    See https://en.wikipedia.org/wiki/SRGB. Code taken from
+    https://kornia.readthedocs.io/en/latest/_modules/kornia/color/rgb.html#linear_rgb_to_rgb."""
     threshold = 0.0031308
     rgb: torch.Tensor = torch.where(
         linear > threshold,
@@ -560,6 +691,23 @@ def linear_to_srgb(
     )
 
     return rgb
+
+
+@torch_compile(dynamic=True, mode="reduce-overhead")
+def srgb_to_linear_rgb(
+    rgb: Tensor,
+) -> Tensor:
+    """Convert an sRGB image to linear RGB. Used in colorspace conversions.
+    See https://en.wikipedia.org/wiki/SRGB. Code taken from
+    https://kornia.readthedocs.io/en/latest/_modules/kornia/color/rgb.html#rgb_to_linear_rgb."""
+    threshold = 0.04045
+    linear_rgb: torch.Tensor = torch.where(
+        rgb > threshold,
+        torch.pow(((rgb + 0.055) / 1.055), 2.4),
+        rgb / 12.92,
+    )
+
+    return linear_rgb
 
 
 def blur_stepfun(x: Tensor, y: Tensor, r: float) -> Tuple[Tensor, Tensor]:
@@ -574,14 +722,13 @@ def blur_stepfun(x: Tensor, y: Tensor, r: float) -> Tuple[Tensor, Tensor]:
 
 
 @torch_compile
-def sorted_interp_quad(x, xp, fpdf, fcdf):
+def sorted_interp_quad(x: Tensor, xp: Tensor, fpdf: Tensor, fcdf: Tensor) -> Tensor:
     """interp in quadratic"""
 
     # Identify the location in `xp` that corresponds to each `x`.
     # The final `True` index in `mask` is the start of the matching interval.
     mask = x[..., None, :] >= xp[..., :, None]
 
-    @torch_compile
     def find_interval(x: Tensor, return_idx=False):
         # Grab the value where `mask` switches from True to False, and vice versa.
         # This approach takes advantage of the fact that `x` is sorted.
@@ -604,3 +751,19 @@ def sorted_interp_quad(x, xp, fpdf, fcdf):
 
     ret = fcdf0 + (x - xp0) * (fpdf0 + fpdf1 * offset + fpdf0 * (1 - offset)) / 2
     return ret
+
+
+@torch_compile(dynamic=True)
+def leaky_clip(
+    x: torch.Tensor,
+    min: float = 0.0,
+    max: float = 1.0,
+) -> torch.Tensor:
+    """
+    Clip x to the range [0, 1] while still allowing gradients to 
+    push it back inside the bounds. If x will be in range (0, 1)
+    nothing happend.
+    """
+    with torch.no_grad():
+        delta = x.clip(min=min, max=max).sub(x)
+    return x + delta

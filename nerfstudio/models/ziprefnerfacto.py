@@ -75,7 +75,7 @@ class ZipRefNerfactoModel(ZipNerfactoModel):
             scale_featurization=self.config.scale_featurization,
             regularize_function=self.regularize_function,
             compute_hash_regularization=self.config.compute_hash_regularization,
-            deg_view=self.config.deg_view,
+            levels=self.config.levels,
             use_reflections=self.config.use_reflections,
             use_ide_enc=self.config.use_ide_enc,
             use_pred_roughness=self.config.use_pred_roughness,

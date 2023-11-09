@@ -42,7 +42,9 @@ class FieldHeadNames(Enum):
     ALPHA = "alpha"
     GRADIENT = "gradient"
     HASH_DECAY = "hash_decay"
+    APPEARENCE_DECAY = "appearence_decay"
     SPECULAR_TINT = "specular_tint"
+    SPECULAR_COLOR = "specular_color"
     DIFFUSE_COLOR = "diffuse_color"
     ROUGHNESS = "roughness"
 
