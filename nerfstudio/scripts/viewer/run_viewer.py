@@ -108,7 +108,10 @@ def _start_viewer(config: TrainerConfig, pipeline: Pipeline, step: int):
 
     # We don't need logging, but writer.GLOBAL_BUFFER needs to be populated
     config.logging.local_writer.enable = False
-    writer.setup_local_writer(config.logging, max_iter=config.max_num_iterations, banner_messages=banner_messages)
+    writer.setup_global_buffer(
+        config.logging,
+        max_iter=config.max_num_iterations,
+    )
 
     assert viewer_state and pipeline.datamanager.train_dataset
     viewer_state.init_scene(

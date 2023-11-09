@@ -400,7 +400,7 @@ class GenerfactoModel(Model):
 
         # lambertian shading
         if self.config.random_light_source:  # and self.training:
-            light_d = ray_bundle.origins[0] + torch.randn(3, dtype=torch.float).to(normals)
+            light_d = ray_bundle.origins[0] + torch.randn(3, dtype=normals.dtype, device=normals.device)
         else:
             light_d = ray_bundle.origins[0]
         light_d = math.safe_normalize(light_d)

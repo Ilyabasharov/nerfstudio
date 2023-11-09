@@ -188,7 +188,29 @@ def write_out_storage():
     EVENT_STORAGE.clear()
 
 
-def setup_local_writer(config: cfg.LoggingConfig, max_iter: int, banner_messages: Optional[List[str]] = None) -> None:
+def setup_global_buffer(
+    config: cfg.LoggingConfig,
+    max_iter: int,
+) -> None:
+    """Initialization of global buffer from config.
+    Must be executed before initializing the model.
+
+    Args:
+        config: configuration to instantiate loggers
+        max_iter: maximum number of train iterations
+    """
+
+    ## configure all the global buffer basic information
+    GLOBAL_BUFFER["max_iter"] = max_iter
+    GLOBAL_BUFFER["max_buffer_size"] = config.max_buffer_size
+    GLOBAL_BUFFER["steps_per_log"] = config.steps_per_log
+    GLOBAL_BUFFER["events"] = {}
+
+
+def setup_local_writer(
+    config: cfg.LoggingConfig,
+    banner_messages: Optional[List[str]] = None,
+) -> None:
     """Initialization of all event writers specified in config
 
     Args:
@@ -201,12 +223,6 @@ def setup_local_writer(config: cfg.LoggingConfig, max_iter: int, banner_messages
         EVENT_WRITERS.append(curr_writer)
     else:
         CONSOLE.log("disabled local writer")
-
-    ## configure all the global buffer basic information
-    GLOBAL_BUFFER["max_iter"] = max_iter
-    GLOBAL_BUFFER["max_buffer_size"] = config.max_buffer_size
-    GLOBAL_BUFFER["steps_per_log"] = config.steps_per_log
-    GLOBAL_BUFFER["events"] = {}
 
 
 def is_initialized():

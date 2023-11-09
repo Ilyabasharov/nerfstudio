@@ -26,6 +26,7 @@ from torch import nn
 
 from nerfstudio.model_components.scalers import _HashGradientScaler
 from nerfstudio.utils.writer import GLOBAL_BUFFER
+from nerfstudio.utils.misc import identity_func
 
 
 class BundleAdjustment(nn.Module):
@@ -46,10 +47,14 @@ class BundleAdjustment(nn.Module):
         self.use_bundle_adjust = use_bundle_adjust
         self.coarse_to_fine_iters = coarse_to_fine_iters
         self.step = 0
-        self.max_iters: int = GLOBAL_BUFFER.get("max_iter", 10000)
+        
+        if "max_iter" in GLOBAL_BUFFER:
+            self.max_iters: int = GLOBAL_BUFFER["max_iter"] 
+        else:
+            raise EnvironmentError("Set `GLOBAL_BUFFER` before model initialisation.")
 
         if not use_bundle_adjust:
-            self.forward = lambda x: x
+            self.forward = identity_func
         else:
              # check that inputs args are correct
             assert coarse_to_fine_iters is not None and (
@@ -61,19 +66,29 @@ class BundleAdjustment(nn.Module):
 
             self.forward = self.mask_freqs
 
+    def eval(self) -> "BundleAdjustment":
+        self._force_turn_off()
+        return self.train(False)
+    
+    def _force_turn_off(self):
+        """Forced shutdown of the module"""
+        self.forward = identity_func
+        self.use_bundle_adjust = False
+
     def step_cb(self, step: int) -> None:
         """Record current step"""
         self.step = step
 
         # Turn off bundle adjustment
         if self.get_progress() >= 1:
-            self.use_bundle_adjust = False
+            self._force_turn_off()
 
     def mask_freqs(
         self,
         input_features: Float[Tensor, "*bs features"],
     ) -> Float[Tensor, "*bs features"]:
         """Masking input features"""
+        raise NotImplementedError
 
     def get_progress(self) -> float:
         """Log unlocked features"""

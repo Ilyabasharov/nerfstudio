@@ -149,7 +149,7 @@ class NerfactoModelConfig(ModelConfig):
     """Type of bundle_adjustment."""
     use_bundle_adjust: bool = False
     """Whether to bundle adjust (BARF)"""
-    coarse_to_fine_iters: Optional[Tuple[float, float]] = (0.05, 0.5)
+    coarse_to_fine_iters: Optional[Tuple[float, float]] = (0.02, 0.15)
     """Iterations (as a percentage of total iterations) at which coarse to fine hash grid optimization starts and ends.
     Linear interpolation between (start, end) and full activation of hash grid from end onwards."""
     implementation: Literal["tcnn", "torch"] = "tcnn"
@@ -192,6 +192,22 @@ class NerfactoModel(Model):
             use_bundle_adjust=self.config.use_bundle_adjust,
             coarse_to_fine_iters=self.config.coarse_to_fine_iters,
         )
+
+        # Make sure that bundle adjust fine iters less then annealing steps
+        ## If the coarse-to-fine scheduling lasts longer than annealing,
+        ## high frequency details which were missed earlier in training can be impossible to recover
+        ## since the rays are never sampled in those regions.
+        if self.config.use_bundle_adjust:
+            from nerfstudio.utils.writer import GLOBAL_BUFFER
+            max_iters = GLOBAL_BUFFER.get("max_iter")
+            fine_iters = self.config.coarse_to_fine_iters[1]
+            bundle_adjustment_max_num_iters = fine_iters * max_iters
+            if bundle_adjustment_max_num_iters > self.config.proposal_weights_anneal_max_num_iters:
+                raise ValueError(
+                    f'Got small value of annealing steps: {self.config.proposal_weights_anneal_max_num_iters}. '
+                    f'Put it more than bundle adjustment steps (now {bundle_adjustment_max_num_iters}). '
+                    'See details in https://github.com/nerfstudio-project/nerfstudio/pull/2366#issuecomment-1692088210.'
+                )
 
         # Fields
         self.field = NerfactoField(

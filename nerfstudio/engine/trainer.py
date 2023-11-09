@@ -145,6 +145,12 @@ class Trainer:
                 'test': loads train/test datasets into memory
                 'inference': does not load any dataset into memory
         """
+        # Run before the pipeline initialisation for seting global buffer
+        writer.setup_global_buffer(
+            self.config.logging,
+            max_iter=self.config.max_num_iterations,
+        )
+
         self.pipeline = self.config.pipeline.setup(
             device=self.device,
             test_mode=test_mode,
@@ -202,7 +208,8 @@ class Trainer:
             project_name=self.config.project_name,
         )
         writer.setup_local_writer(
-            self.config.logging, max_iter=self.config.max_num_iterations, banner_messages=banner_messages
+            self.config.logging,
+            banner_messages=banner_messages,
         )
         writer.put_config(name="config", config_dict=dataclasses.asdict(self.config), step=0)
         profiler.setup_profiler(self.config.logging, writer_log_path)

@@ -92,7 +92,7 @@ def exp_map_SE3(tangent_vector: Float[Tensor, "b 6"]) -> Float[Tensor, "b 3 4"]:
     cosine = torch.where(near_zero, 8 / (4 + theta2) - 1, theta.cos())
     sine_by_theta = torch.where(near_zero, 0.5 * cosine + 0.5, sine / theta_nz)
     one_minus_cosine_by_theta2 = torch.where(near_zero, 0.5 * sine_by_theta, (1 - cosine) / theta2_nz)
-    ret = torch.zeros(tangent_vector.shape[0], 3, 4).to(dtype=tangent_vector.dtype, device=tangent_vector.device)
+    ret = torch.zeros(tangent_vector.shape[0], 3, 4, dtype=tangent_vector.dtype, device=tangent_vector.device)
     ret[:, :3, :3] = one_minus_cosine_by_theta2 * tangent_vector_ang @ tangent_vector_ang.transpose(1, 2)
 
     ret[:, 0, 0] += cosine.view(-1)

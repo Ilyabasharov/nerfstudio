@@ -230,7 +230,12 @@ method_configs["depth-nerfacto"] = TrainerConfig(
             pose_optimizer=PoseOptimizerConfig(
                 mode="SO3xR3",
                 optimizer=RAdamOptimizerConfig(lr=6e-4, eps=1e-8, weight_decay=1e-3),
-                scheduler=ExponentialDecaySchedulerConfig(lr_final=6e-5, max_steps=50000),
+                scheduler=ExponentialDecaySchedulerConfig(
+                    delay_steps=5000,
+                    warmup_steps=3000,
+                    lr_final=1e-5,
+                    max_steps=50000,
+                ),
             ),
             intrinsic_optimizer=IntrinsicOptimizerConfig(
                 mode="square_scale",
@@ -265,14 +270,14 @@ method_configs["depth-nerfacto"] = TrainerConfig(
             hidden_dim_color=512,
             appearance_embed_dim=128,
             max_res=8192,
-            proposal_weights_anneal_max_num_iters=5000,
+            proposal_weights_anneal_max_num_iters=10000,
             log2_hashmap_size=22,
             features_per_level=8,
             use_appearance_embedding=True,
             use_depth_ranking_loss=False,
             use_gradient_scaling=False,
             compute_hash_regularization=False,
-            use_bundle_adjust=False,
+            use_bundle_adjust=True,
         ),
     ),
     optimizers={

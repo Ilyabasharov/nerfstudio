@@ -240,15 +240,15 @@ class Cameras(TensorDataclass):
             c_x_y: cx or cy for when h_w == None
         """
         if isinstance(h_w, int):
-            h_w = torch.as_tensor([h_w]).to(torch.int64).to(self.device)
+            h_w = torch.as_tensor([h_w], dtype=torch.int64, device=self.device)
         elif isinstance(h_w, torch.Tensor):
             assert not torch.is_floating_point(h_w), f"height and width tensor must be of type int, not: {h_w.dtype}"
-            h_w = h_w.to(torch.int64).to(self.device)
+            h_w = h_w.to(dtype=torch.int64, device=self.device)
             if h_w.ndim == 0 or h_w.shape[-1] != 1:
                 h_w = h_w.unsqueeze(-1)
         # assert torch.all(h_w == h_w.view(-1)[0]), "Batched cameras of different h, w will be allowed in the future."
         elif h_w is None:
-            h_w = torch.as_tensor((c_x_y * 2)).to(torch.int64).to(self.device)
+            h_w = torch.as_tensor((c_x_y * 2), dtype=torch.int64, device=self.device)
         else:
             raise ValueError("Height must be an int, tensor, or None, received: " + str(type(h_w)))
         return h_w
@@ -956,7 +956,7 @@ class Cameras(TensorDataclass):
             scaling_factor: Scaling factor to apply to the output resolution.
         """
         if isinstance(scaling_factor, (float, int)):
-            scaling_factor = torch.tensor([scaling_factor]).to(self.device).broadcast_to((self.cx.shape))
+            scaling_factor = torch.tensor([scaling_factor], device=self.device).broadcast_to((self.cx.shape))
         elif isinstance(scaling_factor, torch.Tensor) and scaling_factor.shape == self.shape:
             scaling_factor = scaling_factor.unsqueeze(-1)
         elif isinstance(scaling_factor, torch.Tensor) and scaling_factor.shape == (*self.shape, 1):
