@@ -28,7 +28,6 @@ import tyro
 from nerfstudio.configs.base_config import ViewerConfig
 from nerfstudio.engine.trainer import TrainerConfig
 from nerfstudio.pipelines.base_pipeline import Pipeline
-from nerfstudio.utils import writer
 from nerfstudio.utils.eval_utils import eval_setup
 from nerfstudio.viewer.server.viewer_state import ViewerState
 from nerfstudio.viewer_beta.viewer import Viewer as ViewerBetaState
@@ -105,13 +104,6 @@ def _start_viewer(config: TrainerConfig, pipeline: Pipeline, step: int):
             pipeline=pipeline,
         )
         banner_messages = [f"Viewer Beta at: {viewer_state.viewer_url}"]
-
-    # We don't need logging, but writer.GLOBAL_BUFFER needs to be populated
-    config.logging.local_writer.enable = False
-    writer.setup_global_buffer(
-        config.logging,
-        max_iter=config.max_num_iterations,
-    )
 
     assert viewer_state and pipeline.datamanager.train_dataset
     viewer_state.init_scene(

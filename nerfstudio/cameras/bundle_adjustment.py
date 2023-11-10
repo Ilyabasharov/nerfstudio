@@ -47,11 +47,6 @@ class BundleAdjustment(nn.Module):
         self.use_bundle_adjust = use_bundle_adjust
         self.coarse_to_fine_iters = coarse_to_fine_iters
         self.step = 0
-        
-        if "max_iter" in GLOBAL_BUFFER:
-            self.max_iters: int = GLOBAL_BUFFER["max_iter"] 
-        else:
-            raise EnvironmentError("Set `GLOBAL_BUFFER` before model initialisation.")
 
         if not use_bundle_adjust:
             self.forward = identity_func
@@ -63,6 +58,11 @@ class BundleAdjustment(nn.Module):
 
             assert (coarse_to_fine_iters[0] < coarse_to_fine_iters[1]
             ), f"start should be less than end iterations for bundle adjustment, got {coarse_to_fine_iters}"
+
+            if "max_iter" in GLOBAL_BUFFER:
+                self.max_iters: int = GLOBAL_BUFFER["max_iter"]
+            else:
+                raise EnvironmentError("Set `GLOBAL_BUFFER` before model initialisation.")
 
             self.forward = self.mask_freqs
 
@@ -151,11 +151,10 @@ class HashGradBundleAdjustment(HashBundleAdjustment):
         self,
         input_features: Float[Tensor, "*bs num_levels features_per_level"],
     ) -> Float[Tensor, "*bs num_levels features_per_level"]:
-
-        mask_vals = self._get_masks(input_features)[None, ..., None]
-
         masked = input_features
-        if self.training and mask_vals is not None:
+
+        if self.training:
+            mask_vals = self._get_masks(input_features)[None, ..., None]
             masked, _ = _HashGradientScaler.apply(input_features, mask_vals) # type: ignore
 
         return masked

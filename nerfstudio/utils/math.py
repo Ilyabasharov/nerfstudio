@@ -676,7 +676,7 @@ def reflect(viewdirs: Tensor, normals: Tensor) -> Tensor:
     )
 
 
-@torch_compile(dynamic=True, mode="reduce-overhead")
+@torch_compile(dynamic=True)
 def linear_rgb_to_srgb(
     linear: Tensor,
 ) -> Tensor:
@@ -693,7 +693,7 @@ def linear_rgb_to_srgb(
     return rgb
 
 
-@torch_compile(dynamic=True, mode="reduce-overhead")
+@torch_compile(dynamic=True)
 def srgb_to_linear_rgb(
     rgb: Tensor,
 ) -> Tensor:

@@ -30,6 +30,7 @@ from nerfstudio.data.datamanagers.base_datamanager import VanillaDataManagerConf
 from nerfstudio.engine.trainer import TrainerConfig
 from nerfstudio.pipelines.base_pipeline import Pipeline
 from nerfstudio.utils.rich_utils import CONSOLE
+from nerfstudio.utils import writer
 
 
 def eval_load_checkpoint(config: TrainerConfig, pipeline: Pipeline) -> Tuple[Path, int]:
@@ -87,6 +88,13 @@ def eval_setup(
     # load save config
     config = yaml.load(config_path.read_text(), Loader=yaml.Loader)
     assert isinstance(config, TrainerConfig)
+
+    # We don't need logging, but writer.GLOBAL_BUFFER needs to be populated
+    config.logging.local_writer.enable = False
+    writer.setup_global_buffer(
+        config.logging,
+        max_iter=config.max_num_iterations,
+    )
 
     config.pipeline.datamanager._target = all_methods[config.method_name].pipeline.datamanager._target
     config.pipeline.model.visualize_weights_distribution = False

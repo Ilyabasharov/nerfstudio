@@ -27,6 +27,7 @@ import torch
 from torch import nn
 from torch.nn import Parameter
 from matplotlib.figure import Figure
+from rich.progress import track
 
 from nerfstudio.cameras.rays import RayBundle
 from nerfstudio.configs.base_config import InstantiateConfig
@@ -201,7 +202,7 @@ class Model(nn.Module):
             vis_outputs = defaultdict(list)
             vis_outputs['vis_indexes'] = [[unravel_index(vis_indexes, (image_height, image_width))]]
 
-        for i in range(0, num_rays, num_rays_per_chunk):
+        for i in track(range(0, num_rays, num_rays_per_chunk), description="Generate model outputs", transient=True):
             start_idx = i
             end_idx = i + num_rays_per_chunk
             ray_bundle = flattened_camera_ray_bundle[start_idx:end_idx]

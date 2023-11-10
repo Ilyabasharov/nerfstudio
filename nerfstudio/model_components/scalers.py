@@ -49,7 +49,8 @@ def scale_gradients_by_distance_squared(
 ) -> Dict[FieldHeadNames, Tensor]:
     """
     Scale gradients by the ray distance to the pixel
-    as suggested in `Radiance Field Gradient Scaling for Unbiased Near-Camera Training` paper
+    as suggested in `Radiance Field Gradient Scaling for Unbiased Near-Camera Training` paper.
+    See https://arxiv.org/abs/2305.02756
 
     Note: The scaling is applied on the interval of [0, 1] along the ray!
 
@@ -58,8 +59,7 @@ def scale_gradients_by_distance_squared(
             >>> field_outputs = scale_gradient_by_distance_squared(field_outputs, ray_samples)
     """
     out = {}
-    ray_dist = (ray_samples.frustums.starts + ray_samples.frustums.ends) / 2
-    scaling = ray_dist.square_().clamp_(0, 1)
+    scaling = ray_samples.frustums.get_steps().square_().clamp_(0, 1)
     for key, value in field_outputs.items():
         if key in field_names_exclude:
             out[key] = value
@@ -71,7 +71,7 @@ def scale_gradients_by_distance_squared(
 class _HashGradientScaler(torch.autograd.Function):  # typing: ignore
     """
     Scales the gradients of hash features based on a provided mask
-    Ideas taken from https://camp-nerf.github.io
+    Ideas taken from https://arxiv.org/abs/2302.01571
     """
 
     @staticmethod
@@ -79,11 +79,11 @@ class _HashGradientScaler(torch.autograd.Function):  # typing: ignore
         ctx,
         value: Float[Tensor, "bs num_levels features_per_level"],
         mask: Float[Tensor, "bs num_levels features_per_level"],
-    ):
+    ) -> Tuple[Tensor, Tensor]:
         ctx.save_for_backward(mask)
         return value, mask
 
     @staticmethod
-    def backward(ctx, output_grad, grad_scaling):
+    def backward(ctx, output_grad, grad_scaling) -> Tuple[Tensor, Tensor]:
         (mask,) = ctx.saved_tensors
         return output_grad * mask, grad_scaling

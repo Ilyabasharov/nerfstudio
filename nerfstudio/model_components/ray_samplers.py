@@ -377,7 +377,11 @@ class PDFSampler(Sampler):
         cdf_g1 = torch.gather(cdf, -1, above)
         bins_g1 = torch.gather(existing_bins, -1, above)
 
-        t = torch.clip(torch.nan_to_num((u - cdf_g0) / (cdf_g1 - cdf_g0), 0), 0, 1)
+        t = torch.where(
+            cdf_g1 - cdf_g0 == 0,
+            0,
+            (u - cdf_g0) / (cdf_g1 - cdf_g0),
+        ).clip_(0, 1)
         bins = bins_g0 + t * (bins_g1 - bins_g0)
 
         if self.include_original:
