@@ -516,8 +516,8 @@ class PowURFLoss(URFLoss):
         line_of_sight_loss_dist = (line_of_sight_loss_dist_mask * focal_mask * self.regularize_fn(transmittance)).sum(-2)
 
         line_of_sight_loss_near_mask = torch.logical_and(
-            steps <= termination_depth + sigma,
-            steps >= termination_depth - sigma,
+            steps < termination_depth + sigma,
+            steps > termination_depth - sigma,
         )  # [batch num_samples 1]
 
         # Near step, see eq. 16
@@ -554,6 +554,20 @@ class DepthLossType(Enum):
     POWURF = PowURFLoss
 
 
+def decay_loss(
+    decay_list: List[Float[Tensor, "*"]],
+    regularize_fn: Callable[[Tensor], Tensor] = lambda x: x,
+) -> Float[Tensor, "0"]:
+    """Implementation of decay loss."""
+    loss: Tensor = sum(
+        regularize_fn(decay).mean()
+        for decay in decay_list
+    )  # type: ignore
+
+    return loss
+
+
+
 def hash_decay_loss(
     hash_decay_list: List[Float[Tensor, "0"]],
 ) -> Float[Tensor, "0"]:
@@ -576,7 +590,7 @@ def monosdf_normal_loss(
     """
     normal_gt = torch.nn.functional.normalize(normal_gt, p=2, dim=-1)
     normal_pred = torch.nn.functional.normalize(normal_pred, p=2, dim=-1)
-    l1 = torch.abs(normal_pred - normal_gt).sum(dim=-1).mean()
+    l1 = (normal_pred - normal_gt).abs().sum(dim=-1).mean()
     cos = (1.0 - torch.sum(normal_pred * normal_gt, dim=-1)).mean()
     return l1 + cos
 

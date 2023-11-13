@@ -332,7 +332,7 @@ class PDFSampler(Sampler):
         weights = weights[..., 0]
 
         # Add small offset to rays with zero weight to prevent NaNs
-        weights_sum = torch.sum(weights, dim=-1, keepdim=True)
+        weights_sum = weights.sum(dim=-1, keepdim=True)
         padding = torch.relu(eps - weights_sum)
         weights = weights + padding / weights.shape[-1]
         weights_sum += padding

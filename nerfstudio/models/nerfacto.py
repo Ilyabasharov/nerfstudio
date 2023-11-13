@@ -46,7 +46,7 @@ from nerfstudio.model_components.losses import (
     interlevel_loss,
     orientation_loss,
     pred_normal_loss,
-    hash_decay_loss,
+    decay_loss,
     zipnerf_loss,
 )
 from nerfstudio.model_components.scalers import scale_gradients_by_distance_squared
@@ -125,6 +125,10 @@ class NerfactoModelConfig(ModelConfig):
     """Whether to compute regularization on appearence embeddings."""
     appearence_decay_loss_mult: float = 0.00001
     """Appearence decay loss multiplier."""
+    compute_density_regularization: bool = False
+    """Whether to compute regularization on density."""
+    density_decay_loss_mult: float = 0.0001
+    """Density decay loss multiplier."""
     use_proposal_weight_anneal: bool = True
     """Whether to use proposal weight annealing."""
     regularize_function: Literal["abs", "square"] = "square"
@@ -145,11 +149,11 @@ class NerfactoModelConfig(ModelConfig):
     """Whether to disable scene contraction or not."""
     use_gradient_scaling: bool = False
     """Use gradient scaler where the gradients are lower for points closer to the camera."""
-    bundle_adjustment_type: BundleAdjustmentType = BundleAdjustmentType.BAANGP
+    bundle_adjustment_type: BundleAdjustmentType = BundleAdjustmentType.CAMP
     """Type of bundle_adjustment."""
     use_bundle_adjust: bool = False
     """Whether to bundle adjust (BARF)"""
-    coarse_to_fine_iters: Optional[Tuple[float, float]] = (0.02, 0.15)
+    coarse_to_fine_iters: Optional[Tuple[float, float]] = (0.1, 0.3)
     """Iterations (as a percentage of total iterations) at which coarse to fine hash grid optimization starts and ends.
     Linear interpolation between (start, end) and full activation of hash grid from end onwards."""
     implementation: Literal["tcnn", "torch"] = "tcnn"
@@ -451,6 +455,9 @@ class NerfactoModel(Model):
             if self.config.compute_appearence_regularization:
                 outputs["appearance_decay_loss"] = field_outputs[FieldHeadNames.APPEARENCE_DECAY].mean()
 
+            if self.config.compute_density_regularization:
+                outputs["density_decay_loss"] = decay_loss(density_list, regularize_fn=torch.abs).mean()
+
             if self.config.predict_normals:
                 outputs["rendered_orientation_loss"] = orientation_loss(
                     weights.detach(), field_outputs[FieldHeadNames.NORMALS], ray_bundle.directions
@@ -513,11 +520,15 @@ class NerfactoModel(Model):
 
             if self.config.compute_hash_regularization:
                 # hash encoding loss proposed in zip-nerf
-                loss_dict["hash_decay_loss"] = self.config.hash_decay_loss_mult * hash_decay_loss(outputs["hash_decay"])
+                loss_dict["hash_decay_loss"] = self.config.hash_decay_loss_mult * decay_loss(outputs["hash_decay"])
 
             if self.config.compute_appearence_regularization:
                 # appearence regularization loss for stable training
                 loss_dict["appearance_decay_loss"] = self.config.appearence_decay_loss_mult * outputs["appearance_decay_loss"]
+
+            if self.config.compute_density_regularization:
+                # appearence regularization loss for stable training
+                loss_dict["density_decay_loss"] = self.config.density_decay_loss_mult * outputs["density_decay_loss"]
 
             if self.config.predict_normals:
                 # orientation loss for computed normals
