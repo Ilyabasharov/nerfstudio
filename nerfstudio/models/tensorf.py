@@ -23,6 +23,7 @@ from typing import Dict, List, Literal, Tuple, Type, cast
 
 import numpy as np
 import torch
+from torch import Tensor
 from torch.nn import Parameter
 from torchmetrics.functional import structural_similarity_index_measure
 from torchmetrics.image import PeakSignalNoiseRatio
@@ -300,7 +301,7 @@ class TensoRFModel(Model):
         outputs = {"rgb": rgb, "accumulation": accumulation, "depth": depth}
         return outputs
 
-    def get_loss_dict(self, outputs, batch, metrics_dict=None) -> Dict[str, torch.Tensor]:
+    def get_loss_dict(self, outputs, batch, metrics_dict=None) -> Dict[str, Tensor]:
         # Scaling metrics by coefficients to create the losses.
         device = outputs["rgb"].device
         image = batch["image"][..., :3].to(device)
@@ -322,8 +323,8 @@ class TensoRFModel(Model):
         elif self.config.regularization == "tv":
             density_plane_coef = self.field.density_encoding.plane_coef
             color_plane_coef = self.field.color_encoding.plane_coef
-            assert isinstance(color_plane_coef, torch.Tensor) and isinstance(
-                density_plane_coef, torch.Tensor
+            assert isinstance(color_plane_coef, Tensor) and isinstance(
+                density_plane_coef, Tensor
             ), "TV reg only supported for TensoRF encoding types with plane_coef attribute"
             loss_dict["tv_reg_density"] = tv_loss(density_plane_coef)
             loss_dict["tv_reg_color"] = tv_loss(color_plane_coef)
@@ -336,8 +337,8 @@ class TensoRFModel(Model):
         return loss_dict
 
     def get_image_metrics_and_images(
-        self, outputs: Dict[str, torch.Tensor], batch: Dict[str, torch.Tensor]
-    ) -> Tuple[Dict[str, float], Dict[str, torch.Tensor]]:
+        self, outputs: Dict[str, Tensor], batch: Dict[str, Tensor]
+    ) -> Tuple[Dict[str, float], Dict[str, Tensor]]:
         image = batch["image"].to(outputs["rgb"].device)
         image = self.renderer_rgb.blend_background(image)
         rgb = outputs["rgb"]
@@ -357,7 +358,7 @@ class TensoRFModel(Model):
         rgb = torch.moveaxis(rgb, -1, 0)[None, ...]
 
         psnr = self.psnr(image, rgb)
-        ssim = cast(torch.Tensor, self.ssim(image, rgb))
+        ssim = cast(Tensor, self.ssim(image, rgb))
         lpips = self.lpips(image, rgb)
 
         metrics_dict = {

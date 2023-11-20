@@ -20,6 +20,7 @@ from __future__ import annotations
 from typing import Dict, List, Tuple
 
 import torch
+from torch import Tensor
 from torch.nn import Parameter
 from torchmetrics.functional import structural_similarity_index_measure
 from torchmetrics.image import PeakSignalNoiseRatio
@@ -58,7 +59,7 @@ class MipNerfModel(Model):
         self.field = None
         assert config.collider_params is not None, "MipNeRF model requires bounding box collider parameters."
         super().__init__(config=config, **kwargs)
-        assert self.config.collider_params is not None, "mip-NeRF requires collider parameters to be set."
+        assert self.config.collider_params is not None, "Mip-NeRF requires collider parameters to be set."
 
     def populate_modules(self):
         """Set the fields and modules"""
@@ -159,8 +160,8 @@ class MipNerfModel(Model):
         return loss_dict
 
     def get_image_metrics_and_images(
-        self, outputs: Dict[str, torch.Tensor], batch: Dict[str, torch.Tensor]
-    ) -> Tuple[Dict[str, float], Dict[str, torch.Tensor]]:
+        self, outputs: Dict[str, Tensor], batch: Dict[str, Tensor]
+    ) -> Tuple[Dict[str, float], Dict[str, Tensor]]:
         assert self.config.collider_params is not None, "mip-NeRF requires collider parameters to be set."
         image = batch["image"].to(outputs["rgb_coarse"].device)
         image = self.renderer_rgb.blend_background(image)
@@ -199,7 +200,7 @@ class MipNerfModel(Model):
         fine_ssim = self.ssim(image, rgb_fine)
         fine_lpips = self.lpips(image, rgb_fine)
 
-        assert isinstance(fine_ssim, torch.Tensor)
+        assert isinstance(fine_ssim, Tensor)
         metrics_dict = {
             "psnr": float(fine_psnr.item()),
             "coarse_psnr": float(coarse_psnr.item()),

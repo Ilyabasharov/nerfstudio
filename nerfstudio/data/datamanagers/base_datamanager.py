@@ -33,15 +33,13 @@ from typing import (
     Optional,
     Tuple,
     Type,
-    Union,
     cast,
     ForwardRef,
     get_origin,
     get_args,
 )
 
-import torch
-from torch import nn
+from torch import Tensor, nn
 from torch.nn import Parameter
 from torch.utils.data.distributed import DistributedSampler
 from typing_extensions import TypeVar
@@ -61,7 +59,6 @@ from nerfstudio.data.datasets.base_dataset import InputDataset
 from nerfstudio.data.pixel_samplers import (
     PixelSampler,
     PixelSamplerConfig,
-    PatchPixelSamplerConfig,
 )
 from nerfstudio.data.utils.dataloaders import (
     CacheDataloader,
@@ -72,7 +69,7 @@ from nerfstudio.data.utils.nerfstudio_collate import nerfstudio_collate
 from nerfstudio.engine.callbacks import TrainingCallback, TrainingCallbackAttributes
 from nerfstudio.model_components.ray_generators import RayGenerator
 from nerfstudio.utils.rich_utils import CONSOLE
-from nerfstudio.utils.misc import IterableWrapper, get_orig_class, torch_compile
+from nerfstudio.utils.misc import IterableWrapper, get_orig_class, torch_compile, TORCH_DEVICE
 
 
 def variable_res_collate(batch: List[Dict]) -> Dict:
@@ -89,7 +86,7 @@ def variable_res_collate(batch: List[Dict]) -> Dict:
         images.append(image)
         topop = []
         for key, val in data.items():
-            if isinstance(val, torch.Tensor):
+            if isinstance(val, Tensor):
                 # if the value has same height and width as the image, assume that it should be collated accordingly.
                 if len(val.shape) >= 2 and val.shape[:2] == image.shape[:2]:
                     imgdata_lists[key].append(val)
@@ -393,7 +390,7 @@ class VanillaDataManager(DataManager, Generic[TDataset]):
     def __init__(
         self,
         config: VanillaDataManagerConfig,
-        device: Union[torch.device, str] = "cpu",
+        device: TORCH_DEVICE = "cpu",
         test_mode: Literal["test", "val", "inference"] = "val",
         world_size: int = 1,
         local_rank: int = 0,
@@ -463,6 +460,7 @@ class VanillaDataManager(DataManager, Generic[TDataset]):
     def create_train_dataset(self, **kwargs) -> TDataset:
         """Sets up the data loaders for training"""
         return self.dataset_type(
+            test_mode=self.test_mode,
             dataparser_outputs=self.train_dataparser_outputs,
             scale_factor=self.config.camera_res_scale_factor,
             **kwargs,
@@ -471,6 +469,7 @@ class VanillaDataManager(DataManager, Generic[TDataset]):
     def create_eval_dataset(self, **kwargs) -> TDataset:
         """Sets up the data loaders for evaluation"""
         return self.dataset_type(
+            test_mode=self.test_mode,
             dataparser_outputs=self.dataparser.get_dataparser_outputs(split=self.test_split),
             scale_factor=self.config.camera_res_scale_factor,
             **kwargs
@@ -479,14 +478,16 @@ class VanillaDataManager(DataManager, Generic[TDataset]):
     def _get_pixel_sampler(self, dataset: TDataset, num_rays_per_batch: int) -> PixelSampler:
         """Infer pixel sampler to use."""
         if self.config.patch_size > 1 and isinstance(self.config.pixel_sampler, PixelSamplerConfig):
-            return PatchPixelSamplerConfig().setup(
-                patch_size=self.config.patch_size, num_rays_per_batch=num_rays_per_batch
+            return self.config.pixel_sampler.setup(
+                patch_size=self.config.patch_size,
+                num_rays_per_batch=num_rays_per_batch,
             )
         is_equirectangular = (dataset.cameras.camera_type == CameraType.EQUIRECTANGULAR.value).all()
         if is_equirectangular.any():
             CONSOLE.print("[bold yellow]Warning: Some cameras are equirectangular, but using default pixel sampler.")
         return self.config.pixel_sampler.setup(
-            is_equirectangular=is_equirectangular, num_rays_per_batch=num_rays_per_batch
+            is_equirectangular=is_equirectangular,
+            num_rays_per_batch=num_rays_per_batch,
         )
 
     def setup_train(self):
@@ -558,7 +559,7 @@ class VanillaDataManager(DataManager, Generic[TDataset]):
             num_workers=self.world_size * 4,
         )
 
-    @torch_compile
+    # @torch_compile
     def _next_train_compiled(self, image_batch: Dict):
         assert self.train_pixel_sampler is not None
         batch = self.train_pixel_sampler.sample(image_batch)
@@ -573,7 +574,7 @@ class VanillaDataManager(DataManager, Generic[TDataset]):
         assert isinstance(image_batch, dict)
         return self._next_train_compiled(image_batch)
     
-    @torch_compile
+    # @torch_compile
     def _next_eval_compiled(self, image_batch: Dict):
         assert self.eval_pixel_sampler is not None
         batch = self.eval_pixel_sampler.sample(image_batch)

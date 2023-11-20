@@ -23,6 +23,7 @@ from typing import Dict, List, Tuple, Type
 
 import numpy as np
 import torch
+from torch import Tensor
 from torch.nn import Parameter
 from torchmetrics.functional import structural_similarity_index_measure
 from torchmetrics.image import PeakSignalNoiseRatio
@@ -52,6 +53,7 @@ from nerfstudio.model_components.scene_colliders import NearFarCollider
 from nerfstudio.models.base_model import Model
 from nerfstudio.models.nerfacto import NerfactoModelConfig
 from nerfstudio.utils import colormaps
+from nerfstudio.cameras.bundle_adjustment import HashBundleAdjustment
 
 
 @dataclass
@@ -91,7 +93,8 @@ class SemanticNerfWModel(Model):
 
         # Fields
         self.field = NerfactoField(
-            self.scene_box.aabb,
+            aabb=self.scene_box.aabb,
+            bundle_adjustment=HashBundleAdjustment(use_bundle_adjust=False),
             num_levels=self.config.num_levels,
             max_res=self.config.max_res,
             log2_hashmap_size=self.config.log2_hashmap_size,
@@ -107,12 +110,20 @@ class SemanticNerfWModel(Model):
         # Build the proposal network(s)
         self.proposal_networks = torch.nn.ModuleList()
         if self.config.use_same_proposal_network:
-            network = HashMLPDensityField(self.scene_box.aabb, spatial_distortion=scene_contraction)
+            network = HashMLPDensityField(
+                aabb=self.scene_box.aabb,
+                bundle_adjustment=HashBundleAdjustment(use_bundle_adjust=False),
+                spatial_distortion=scene_contraction,
+            )
             self.proposal_networks.append(network)
             self.density_fns = [network.density_fn for _ in range(self.config.num_proposal_iterations)]
         else:
             for _ in range(self.config.num_proposal_iterations):
-                network = HashMLPDensityField(self.scene_box.aabb, spatial_distortion=scene_contraction)
+                network = HashMLPDensityField(
+                    aabb=self.scene_box.aabb,
+                    bundle_adjustment=HashBundleAdjustment(use_bundle_adjust=False),
+                    spatial_distortion=scene_contraction,
+                )
                 self.proposal_networks.append(network)
             self.density_fns = [network.density_fn for network in self.proposal_networks]
 
@@ -261,8 +272,8 @@ class SemanticNerfWModel(Model):
         return loss_dict
 
     def get_image_metrics_and_images(
-        self, outputs: Dict[str, torch.Tensor], batch: Dict[str, torch.Tensor]
-    ) -> Tuple[Dict[str, float], Dict[str, torch.Tensor]]:
+        self, outputs: Dict[str, Tensor], batch: Dict[str, Tensor]
+    ) -> Tuple[Dict[str, float], Dict[str, Tensor]]:
         image = batch["image"].to(self.device)
         rgb = outputs["rgb"]
         rgb, image = self.renderer_rgb.blend_background_for_loss_computation(

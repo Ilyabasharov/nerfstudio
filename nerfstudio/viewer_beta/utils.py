@@ -17,6 +17,7 @@ from typing import Optional, Tuple
 
 import numpy as np
 import torch
+from torch import Tensor
 from jaxtyping import Float
 
 from nerfstudio.cameras.cameras import Cameras, CameraType
@@ -33,7 +34,7 @@ class CameraState:
     """ The field of view of the camera. """
     aspect: float
     """ The aspect ratio of the image. """
-    c2w: Float[torch.Tensor, "3 4"]
+    c2w: Float[Tensor, "3 4"]
     """ The camera matrix. """
 
 

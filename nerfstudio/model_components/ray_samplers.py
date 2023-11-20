@@ -687,16 +687,15 @@ class NeuSSampler(Sampler):
         self.pdf_sampler = PDFSampler(
             include_original=False,
             single_jitter=single_jitter,
-            histogram_padding=1e-5,
         )
         self.outside_sampler = LinearDisparitySampler()
 
     def generate_ray_samples(
         self,
         ray_bundle: Optional[RayBundle] = None,
-        sdf_fn: Optional[Callable[[RaySamples], torch.Tensor]] = None,
+        sdf_fn: Optional[Callable[[RaySamples], Tensor]] = None,
         ray_samples: Optional[RaySamples] = None,
-    ) -> Union[Tuple[RaySamples, torch.Tensor], RaySamples]:
+    ) -> Union[Tuple[RaySamples, Tensor], RaySamples]:
         assert ray_bundle is not None
         assert sdf_fn is not None
 
@@ -707,7 +706,7 @@ class NeuSSampler(Sampler):
 
         total_iters = 0
         sorted_index = None
-        sdf: Optional[torch.Tensor] = None
+        sdf: Optional[Tensor] = None
         new_samples = ray_samples
 
         base_variance = self.base_variance
@@ -747,7 +746,9 @@ class NeuSSampler(Sampler):
 
     @staticmethod
     def rendering_sdf_with_fixed_inv_s(
-        ray_samples: RaySamples, sdf: Float[Tensor, "num_samples 1"], inv_s: int
+        ray_samples: RaySamples,
+        sdf: Float[Tensor, "num_samples 1"],
+        inv_s: int,
     ) -> Float[Tensor, "num_samples 1"]:
         """
         rendering given a fixed inv_s as NeuS

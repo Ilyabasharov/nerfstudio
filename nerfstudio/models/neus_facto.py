@@ -24,6 +24,7 @@ from typing import Any, Dict, List, Optional, Tuple, Type
 
 import numpy as np
 import torch
+from torch import Tensor
 from torch.nn import Parameter
 
 from nerfstudio.cameras.rays import RayBundle
@@ -212,7 +213,7 @@ class NeuSFactoModel(NeuSModel):
 
     def get_image_metrics_and_images(
         self, outputs: Dict[str, Any], batch: Dict[str, Any]
-    ) -> Tuple[Dict[str, float], Dict[str, torch.Tensor]]:
+    ) -> Tuple[Dict[str, float], Dict[str, Tensor]]:
         """Compute image metrics and images, including the proposal depth for each iteration."""
         metrics_dict, images_dict = super().get_image_metrics_and_images(outputs, batch)
         for i in range(self.config.num_proposal_iterations):

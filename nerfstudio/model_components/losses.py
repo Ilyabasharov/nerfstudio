@@ -96,7 +96,7 @@ def lossfun_outer(
     return torch.clip(w - w_outer, min=0) ** 2 / (w + EPS)
 
 
-def interlevel_loss(weights_list, ray_samples_list) -> torch.Tensor:
+def interlevel_loss(weights_list, ray_samples_list) -> Tensor:
     """Calculates the proposal loss in the MipNeRF-360 paper.
 
     https://github.com/kakaobrain/NeRF-Factory/blob/f61bb8744a5cb4820a4d968fb3bfbed777550f4a/src/model/mipnerf360/model.py#L515

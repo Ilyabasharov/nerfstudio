@@ -28,12 +28,17 @@ from torch import Tensor
 from jaxtyping import Int
 
 T = TypeVar("T")
+TORCH_DEVICE = Union[torch.device, str]
 TKey = TypeVar("TKey")
 Numeric = Union[int, float]
 identity_func = lambda x: x
 
 
-def get_dict_to_torch(stuff: T, device: Union[torch.device, str] = "cpu", exclude: Optional[List[str]] = None) -> T:
+def get_dict_to_torch(
+    stuff: T,
+    device: TORCH_DEVICE = "cpu",
+    exclude: Optional[List[str]] = None,
+) -> T:
     """Set everything in the dict to the specified torch device.
 
     Args:
@@ -48,7 +53,7 @@ def get_dict_to_torch(stuff: T, device: Union[torch.device, str] = "cpu", exclud
             else:
                 stuff[k] = get_dict_to_torch(v, device)
         return stuff
-    if isinstance(stuff, torch.Tensor):
+    if isinstance(stuff, Tensor):
         return stuff.to(device)
     return stuff
 
@@ -63,12 +68,12 @@ def get_dict_to_cpu(stuff: T) -> T:
         for k, v in stuff.items():
             stuff[k] = get_dict_to_cpu(v)
         return stuff
-    if isinstance(stuff, torch.Tensor):
+    if isinstance(stuff, Tensor):
         return stuff.detach().cpu()
     return stuff
 
 
-def get_masked_dict(d: Dict[TKey, torch.Tensor], mask) -> Dict[TKey, torch.Tensor]:
+def get_masked_dict(d: Dict[TKey, Tensor], mask) -> Dict[TKey, Tensor]:
     """Return a masked dictionary.
     TODO(ethan): add more asserts/checks so this doesn't have unpredictable behavior.
 
@@ -227,7 +232,7 @@ def get_orig_class(obj, default=None):
 
 def unravel_index(
     indices: Int[Tensor, "... N"],
-    shape: Tuple[int, ...],
+    dims: Tuple[int, ...], # type: ignore
 ) -> Int[Tensor, "... N D"]:
     r"""Converts flat indices into unraveled coordinates in a target shape.
 
@@ -235,18 +240,18 @@ def unravel_index(
 
     Args:
         indices: A tensor of indices, (*, N).
-        shape: The targeted shape, (D,).
+        dims: The targeted shape, (D,).
 
     Returns:
         unravel coordinates, (*, N, D).
     """
 
-    shape: Tensor = torch.tensor(shape)
-    indices = indices % shape.prod()  # prevent out-of-bounds indices
+    dims: Tensor = torch.tensor(dims)
+    indices = indices % dims.prod()  # prevent out-of-bounds indices
 
-    coord = indices.new_zeros(indices.size() + shape.size())
+    coord = indices.new_zeros(indices.size() + dims.size())
 
-    for i, dim in enumerate(reversed(shape)):
+    for i, dim in enumerate(reversed(dims)):
         coord[..., i] = indices % dim
         indices = indices // dim
 

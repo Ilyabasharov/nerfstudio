@@ -105,7 +105,11 @@ def quaternion_from_matrix(matrix: NDArray, isprecise: bool = False) -> np.ndarr
 
 
 def quaternion_slerp(
-    quat0: NDArray, quat1: NDArray, fraction: float, spin: int = 0, shortestpath: bool = True
+    quat0: NDArray,
+    quat1: NDArray,
+    fraction: float,
+    spin: int = 0,
+    shortestpath: bool = True,
 ) -> np.ndarray:
     """Return spherical linear interpolation between two quaternions.
     Args:
@@ -187,7 +191,9 @@ def get_interpolated_poses(pose_a: NDArray, pose_b: NDArray, steps: int = 10) ->
 
 
 def get_interpolated_k(
-    k_a: Float[Tensor, "3 3"], k_b: Float[Tensor, "3 3"], steps: int = 10
+    k_a: Float[Tensor, "3 3"],
+    k_b: Float[Tensor, "3 3"],
+    steps: int = 10,
 ) -> List[Float[Tensor, "3 4"]]:
     """
     Returns interpolated path between two camera poses with specified number of steps.
@@ -280,12 +286,12 @@ def get_interpolated_poses_many(
     return torch.tensor(traj, dtype=torch.float32), torch.tensor(k_interp, dtype=torch.float32)
 
 
-def normalize(x: torch.Tensor) -> Float[Tensor, "*batch"]:
+def normalize(x: Tensor) -> Float[Tensor, "*batch"]:
     """Returns a normalized vector."""
     return x / torch.linalg.norm(x)
 
 
-def normalize_with_norm(x: torch.Tensor, dim: int) -> Tuple[torch.Tensor, torch.Tensor]:
+def normalize_with_norm(x: Tensor, dim: int) -> Tuple[Tensor, Tensor]:
     """Normalize tensor along axis and return normalized value with norms.
 
     Args:
@@ -303,7 +309,7 @@ def normalize_with_norm(x: torch.Tensor, dim: int) -> Tuple[torch.Tensor, torch.
     return x / norm, norm
 
 
-def viewmatrix(lookat: torch.Tensor, up: torch.Tensor, pos: torch.Tensor) -> Float[Tensor, "*batch"]:
+def viewmatrix(lookat: Tensor, up: Tensor, pos: Tensor) -> Float[Tensor, "*batch"]:
     """Returns a camera transformation matrix.
 
     Args:
@@ -316,8 +322,8 @@ def viewmatrix(lookat: torch.Tensor, up: torch.Tensor, pos: torch.Tensor) -> Flo
     """
     vec2 = normalize(lookat)
     vec1_avg = normalize(up)
-    vec0 = normalize(torch.cross(vec1_avg, vec2))
-    vec1 = normalize(torch.cross(vec2, vec0))
+    vec0 = normalize(torch.linalg.cross(vec1_avg, vec2))
+    vec1 = normalize(torch.linalg.cross(vec2, vec0))
     m = torch.stack([vec0, vec1, vec2, pos], 1)
     return m
 
@@ -342,16 +348,17 @@ def get_distortion_params(
     Returns:
         torch.Tensor: A distortion parameters matrix.
     """
-    return torch.Tensor([k1, k2, k3, k4, p1, p2])
+    return torch.tensor([k1, k2, k3, k4, p1, p2])
 
 
+@torch_compile(dynamic=True, mode="reduce-overhead")
 def _compute_residual_and_jacobian(
-    x: torch.Tensor,
-    y: torch.Tensor,
-    xd: torch.Tensor,
-    yd: torch.Tensor,
-    distortion_params: torch.Tensor,
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor,]:
+    x: Tensor,
+    y: Tensor,
+    xd: Tensor,
+    yd: Tensor,
+    distortion_params: Tensor,
+) -> Tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
     """Auxiliary function of radial_and_tangential_undistort() that computes residuals and jacobians.
     Adapted from MultiNeRF:
     https://github.com/google-research/multinerf/blob/b02228160d3179300c7d499dca28cb9ca3677f32/internal/camera_utils.py#L427-L474
@@ -412,11 +419,11 @@ def _compute_residual_and_jacobian(
 
 @torch_compile(dynamic=True, mode="reduce-overhead")
 def radial_and_tangential_undistort(
-    coords: torch.Tensor,
-    distortion_params: torch.Tensor,
+    coords: Tensor,
+    distortion_params: Tensor,
     eps: float = 1e-3,
     max_iterations: int = 10,
-) -> torch.Tensor:
+) -> Tensor:
     """Computes undistorted coords given opencv distortion parameters.
     Adapted from MultiNeRF
     https://github.com/google-research/multinerf/blob/b02228160d3179300c7d499dca28cb9ca3677f32/internal/camera_utils.py#L477-L509
@@ -468,14 +475,14 @@ def rotation_matrix(a: Float[Tensor, "3"], b: Float[Tensor, "3"]) -> Float[Tenso
     """
     a = a / torch.linalg.norm(a)
     b = b / torch.linalg.norm(b)
-    v = torch.cross(a, b)
+    v = torch.linalg.cross(a, b)
     c = torch.dot(a, b)
     # If vectors are exactly opposite, we add a little noise to one of them
     if c < -1 + 1e-8:
         eps = (torch.rand(3) - 0.5) * 0.01
         return rotation_matrix(a + eps, b)
     s = torch.linalg.norm(v)
-    skew_sym_mat = torch.Tensor(
+    skew_sym_mat = torch.tensor(
         [
             [0, -v[2], v[1]],
             [v[2], 0, -v[0]],
@@ -620,11 +627,11 @@ def auto_orient_and_center_poses(
                 # re-normalize
                 up = up / torch.linalg.norm(up)
 
-        rotation = rotation_matrix(up, torch.Tensor([0, 0, 1]))
+        rotation = rotation_matrix(up, up.new_tensor([0, 0, 1]))
         transform = torch.cat([rotation, rotation @ -translation[..., None]], dim=-1)
         oriented_poses = transform @ poses
     elif method == "none":
-        transform = torch.eye(4)
+        transform = torch.eye(4, dtype=poses.dtype, device=poses.device)
         transform[:3, 3] = -translation
         transform = transform[:3, :]
         oriented_poses = transform @ poses

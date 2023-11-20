@@ -19,10 +19,11 @@ from typing import List, Tuple, Union
 import cv2
 import numpy as np
 import torch
+from torch import Tensor
 from PIL import Image
 
 
-def get_image_mask_tensor_from_path(filepath: Path, scale_factor: float = 1.0) -> torch.Tensor:
+def get_image_mask_tensor_from_path(filepath: Path, scale_factor: float = 1.0) -> Tensor:
     """
     Utility function to read a mask image from the given path and return a boolean tensor
     """
@@ -38,8 +39,10 @@ def get_image_mask_tensor_from_path(filepath: Path, scale_factor: float = 1.0) -
 
 
 def get_semantics_and_mask_tensors_from_path(
-    filepath: Path, mask_indices: Union[List, torch.Tensor], scale_factor: float = 1.0
-) -> Tuple[torch.Tensor, torch.Tensor]:
+    filepath: Path,
+    mask_indices: Union[List, Tensor],
+    scale_factor: float = 1.0,
+) -> Tuple[Tensor, Tensor]:
     """
     Utility function to read segmentation from the given filepath
     If no mask is required - use mask_indices = []
@@ -62,7 +65,7 @@ def get_depth_image_from_path(
     width: int,
     scale_factor: float,
     interpolation: int = cv2.INTER_NEAREST,
-) -> torch.Tensor:
+) -> Tensor:
     """Loads, rescales and resizes depth images.
     Filepath points to a 16-bit or 32-bit depth image, or a numpy array `*.npy`.
 

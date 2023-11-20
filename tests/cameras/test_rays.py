@@ -11,12 +11,12 @@ from nerfstudio.cameras.rays import Frustums
 def test_frustum_get_position():
     """Test position calculation"""
 
-    origin = torch.Tensor([0, 1, 2])[None, ...]
-    direction = torch.Tensor([0, 1, 0])[None, ...]
-    frustum_start = torch.Tensor([2])[None, ...]
-    frustum_end = torch.Tensor([3])[None, ...]
+    origin = torch.tensor([0., 1., 2.])[None, ...]
+    direction = torch.tensor([0., 1., 0.])[None, ...]
+    frustum_start = torch.tensor([2.])[None, ...]
+    frustum_end = torch.tensor([3.])[None, ...]
 
-    target_position = torch.Tensor([0, 3.5, 2])[None, ...]
+    target_position = torch.tensor([0., 3.5, 2.])[None, ...]
 
     frustum = Frustums(
         origins=origin,

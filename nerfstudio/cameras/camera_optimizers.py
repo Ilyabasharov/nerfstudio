@@ -13,14 +13,14 @@
 # limitations under the License.
 
 """
-Pose and Intrinsics Optimizers
+Pose, Intrinsics and Distortion Optimizers
 """
 
 from __future__ import annotations
 
 import functools
 from dataclasses import dataclass, field
-from typing import Literal, Optional, Type, Union, Tuple, Callable
+from typing import Literal, Optional, Type, Tuple, Callable
 
 import torch
 import tyro
@@ -36,6 +36,7 @@ from nerfstudio.engine.schedulers import (
     SchedulerConfig,
 )
 from nerfstudio.utils import poses as pose_utils
+from nerfstudio.utils.misc import TORCH_DEVICE
 
 
 @dataclass
@@ -53,7 +54,7 @@ class PoseOptimizerConfig(InstantiateConfig):
     optimizer: OptimizerConfig = field(default_factory=lambda: AdamOptimizerConfig(lr=6e-4, eps=1e-15))
     """Optimizer for poses."""
     scheduler: SchedulerConfig = field(default_factory=lambda: ExponentialDecaySchedulerConfig(max_steps=10000))
-    """Learning rate scheduler for pose optimizer.."""
+    """Learning rate scheduler for pose optimizer."""
     param_group: tyro.conf.Suppress[str] = "pose_opt"
     """Name of the parameter group used for pose optimization.
     Can be any string that doesn't conflict with other groups."""
@@ -68,7 +69,7 @@ class PoseOptimizer(nn.Module):
         self,
         config: PoseOptimizerConfig,
         num_cameras: int,
-        device: Union[torch.device, str],
+        device: TORCH_DEVICE = "cpu",
         non_trainable_camera_indices: Optional[Int[Tensor, "num_non_trainable_cameras"]] = None,
         **kwargs,
     ) -> None:
@@ -82,7 +83,7 @@ class PoseOptimizer(nn.Module):
         if self.config.mode == "off":
             pass
         elif self.config.mode in ("SO3xR3", "SE3"):
-            self.pose_adjustment = torch.nn.Parameter(torch.zeros((num_cameras, 6), device=device))
+            self.pose_adjustment = nn.Parameter(torch.zeros((num_cameras, 6), device=device))
         else:
             assert_never(self.config.mode)
 
@@ -144,6 +145,8 @@ class IntrinsicOptimizerConfig(InstantiateConfig):
     """Optimizer parameters for intrinsic optimization."""
     scheduler: SchedulerConfig = field(default_factory=lambda: ExponentialDecaySchedulerConfig(max_steps=10000))
     """Learning rate scheduler for intrinsic optimizer."""
+    noise_std: float = 1e-4
+    """Noise to add initialize params. Useful for debugging."""
     param_group: tyro.conf.Suppress[str] = "intrinsic_opt"
     """Name of the parameter group used for intrinsic optimization.
     Can be any string that doesn't conflict with other groups."""
@@ -159,7 +162,7 @@ class IntrinsicOptimizer(nn.Module):
     def __init__(
         self,
         config: IntrinsicOptimizerConfig,
-        device: Union[torch.device, str],
+        device: TORCH_DEVICE = "cpu",
         non_trainable_camera_indices: Optional[Int[Tensor, "num_non_trainable_cameras"]] = None,
         num_cameras: int = 1,
         **kwargs,
@@ -179,10 +182,16 @@ class IntrinsicOptimizer(nn.Module):
                 num_scale_param = self.num_params if param in self.config.mode else 0
                 init_func: Callable = torch.ones if param == "scale" else torch.zeros
 
+                data = (
+                    init_func(num_scale_param, device=device) 
+                    + torch.rand(num_scale_param, device=device)
+                    * config.noise_std
+                )
+
                 self.register_parameter(
                     name=f"{config.param_group}_adjustment_{param}",
-                    param=torch.nn.Parameter(
-                        init_func(num_scale_param, device=device),
+                    param = nn.Parameter(
+                        data=data,
                         requires_grad=True,
                     )
                 )
@@ -209,9 +218,9 @@ class IntrinsicOptimizer(nn.Module):
         """Intrinsics correction
         Args:
             fx: focals at x coordinate to optimize.
-            fy: focals at y coordinate to optimize
+            fy: focals at y coordinate to optimize.
             cx: principal point at x coordinate to optimize.
-            cy: principal point at y coordinate to optimize
+            cy: principal point at y coordinate to optimize.
         Returns:
             Corrected fx, fy, cx, cy
         """
@@ -260,7 +269,7 @@ class DistortionOptimizer(IntrinsicOptimizer):
     def __init__(
         self,
         config: DistortionOptimizerConfig,
-        device: Union[torch.device, str],
+        device: TORCH_DEVICE = "cpu",
         non_trainable_camera_indices: Optional[Int[Tensor, "num_non_trainable_cameras"]] = None,
         num_cameras: int = 1,
         **kwargs,

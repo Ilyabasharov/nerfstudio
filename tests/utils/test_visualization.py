@@ -41,7 +41,8 @@ def test_apply_boolean_colormap():
 
 def test_cube_center():
     """Test adding a cube"""
-    cube = plotly_utils.get_cube(1.0, torch.Tensor([2.0, 3.0, 4.0]))
+    cube = plotly_utils.get_cube(1.0, torch.tensor([2.0, 3.0, 4.0]))
+    assert cube is None
     assert cube.x[0] == 1.5
     assert cube.y[0] == 2.5
     assert cube.z[-1] == 4.5
@@ -49,7 +50,8 @@ def test_cube_center():
 
 def test_aabb_center():
     """Test adding a cube with different dsid length"""
-    cube = plotly_utils.get_cube(torch.Tensor([2.0, 1.0, 3.0]))
+    cube = plotly_utils.get_cube(torch.tensor([2.0, 1.0, 3.0]))
+    assert cube is None
     assert cube.x[0] == -1
     assert cube.y[0] == -0.5
     assert cube.z[-1] == 1.5

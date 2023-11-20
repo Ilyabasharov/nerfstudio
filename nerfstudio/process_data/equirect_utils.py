@@ -22,13 +22,18 @@ from typing import List, Tuple
 import cv2
 import numpy as np
 import torch
+from torch import Tensor
 from rich.progress import BarColumn, Progress, TaskProgressColumn, TextColumn, TimeRemainingColumn
 
 from nerfstudio.utils.rich_utils import CONSOLE, ItersPerSecColumn
+from nerfstudio.utils.misc import TORCH_DEVICE
 
 
 # https://gist.github.com/fgolemo/94b5caf0e209a6e71ab0ce2d75ad3ed8
-def euler_rodriguez_rotation_matrix(axis: torch.Tensor, theta: torch.Tensor) -> torch.Tensor:
+def euler_rodriguez_rotation_matrix(
+    axis: Tensor,
+    theta: Tensor,
+) -> Tensor:
     """Generates a 3x3 rotation matrix from an axis and angle using Euler-Rodriguez formula.
 
     Args:
@@ -53,8 +58,11 @@ def euler_rodriguez_rotation_matrix(axis: torch.Tensor, theta: torch.Tensor) -> 
 
 
 def remap_cubic(
-    img: torch.Tensor, map_x: torch.Tensor, map_y: torch.Tensor, border_mode: str = "border"
-) -> torch.Tensor:
+    img: Tensor,
+    map_x: Tensor,
+    map_y: Tensor,
+    border_mode: str = "border",
+) -> Tensor:
     """Remap image using bicubic interpolation.
 
     Args:
@@ -83,7 +91,14 @@ def remap_cubic(
     return torch.nn.functional.grid_sample(img, grid, mode="bicubic", padding_mode="zeros")
 
 
-def equirect2persp(img: torch.Tensor, fov: int, theta: int, phi: int, hd: int, wd: int) -> torch.Tensor:
+def equirect2persp(
+    img: Tensor,
+    fov: int,
+    theta: int,
+    phi: int,
+    hd: int,
+    wd: int,
+) -> Tensor:
     """Pytorch reimlement of https://github.com/kaustubh-sadekar/OmniCV-Lib for equirectangular to perspective projection.
 
     Args:
@@ -235,6 +250,7 @@ def generate_planar_projections_from_equirectangular(
     planar_image_size: Tuple[int, int],
     samples_per_im: int,
     crop_factor: Tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0),
+    device: TORCH_DEVICE = "cuda",
 ) -> Path:
     """Generate planar projections from an equirectangular image.
 
@@ -252,8 +268,6 @@ def generate_planar_projections_from_equirectangular(
         if i < 0 or i > 1:
             CONSOLE.print("[bold red] Invalid crop factor. All values must be in [0,1].")
             sys.exit(1)
-
-    device = torch.device("cuda")
 
     fov = 120
     yaw_pitch_pairs = []

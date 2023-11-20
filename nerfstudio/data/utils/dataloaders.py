@@ -23,7 +23,6 @@ import random
 from abc import abstractmethod
 from typing import Any, Callable, Dict, List, Optional, Sized, Tuple, Union
 
-import torch
 from rich.progress import track
 from torch.utils.data import Dataset
 from torch.utils.data.dataloader import DataLoader
@@ -32,7 +31,7 @@ from nerfstudio.cameras.cameras import Cameras
 from nerfstudio.cameras.rays import RayBundle
 from nerfstudio.data.datasets.base_dataset import InputDataset
 from nerfstudio.data.utils.nerfstudio_collate import nerfstudio_collate
-from nerfstudio.utils.misc import get_dict_to_torch
+from nerfstudio.utils.misc import get_dict_to_torch, TORCH_DEVICE
 from nerfstudio.utils.rich_utils import CONSOLE
 
 
@@ -53,7 +52,7 @@ class CacheDataloader(DataLoader):
         dataset: Dataset,
         num_images_to_sample_from: int = -1,
         num_times_to_repeat_images: int = -1,
-        device: Union[torch.device, str] = "cpu",
+        device: TORCH_DEVICE = "cpu",
         collate_fn: Callable[[Any], Any] = nerfstudio_collate,
         exclude_batch_keys_from_device: Optional[List[str]] = None,
         **kwargs,
@@ -157,7 +156,7 @@ class EvalDataloader(DataLoader):
     def __init__(
         self,
         input_dataset: InputDataset,
-        device: Union[torch.device, str] = "cpu",
+        device: TORCH_DEVICE = "cpu",
         **kwargs,
     ):
         self.input_dataset = input_dataset
@@ -209,7 +208,7 @@ class FixedIndicesEvalDataloader(EvalDataloader):
         self,
         input_dataset: InputDataset,
         image_indices: Optional[Tuple[int]] = None,
-        device: Union[torch.device, str] = "cpu",
+        device: TORCH_DEVICE = "cpu",
         **kwargs,
     ):
         super().__init__(input_dataset, device, **kwargs)

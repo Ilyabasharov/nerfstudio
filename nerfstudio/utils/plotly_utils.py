@@ -213,7 +213,7 @@ def get_sphere(
 
 
 def get_cube(
-    side_length: Union[float, torch.Tensor],
+    side_length: Union[float, Tensor],
     center: Optional[Float[Tensor, "3"]] = None,
     color: str = "black",
     opacity: float = 1.0,
@@ -320,7 +320,10 @@ def get_gaussian_ellipsiod(
 
 
 def get_gaussian_ellipsoids_list(
-    gaussians: Gaussians, opacity: float = 0.5, color: str = "random", resolution: int = 20
+    gaussians: Gaussians,
+    opacity: float = 0.5,
+    color: str = "random",
+    resolution: int = 20,
 ) -> List[Union[go.Mesh3d, go.Scatter3d]]:  # type: ignore
     """Get a list of plotly meshes for frustums.
 
@@ -363,7 +366,10 @@ def get_gaussian_ellipsoids_list(
 
 
 def get_frustum_mesh(
-    frustum: Frustums, opacity: float = 0.3, color: str = "#DC203C", resolution: int = 20
+    frustum: Frustums,
+    opacity: float = 0.3,
+    color: str = "#DC203C",
+    resolution: int = 20,
 ) -> go.Mesh3d:  # type: ignore
     """Get a plotly mesh for a single frustum.
 
@@ -414,7 +420,10 @@ def get_frustum_mesh(
 
 
 def get_frustums_mesh_list(
-    frustums: Frustums, opacity: float = 1.0, color: str = "random", resolution: int = 20
+    frustums: Frustums,
+    opacity: float = 1.0,
+    color: str = "random",
+    resolution: int = 20,
 ) -> List[go.Mesh3d]:  # type: ignore
     """Get a list of plotly meshes for a list of frustums.
 
@@ -438,7 +447,10 @@ def get_frustums_mesh_list(
 
 
 def get_frustum_points(
-    frustum: Frustums, opacity: float = 1.0, color: str = "forestgreen", size: float = 5
+    frustum: Frustums,
+    opacity: float = 1.0,
+    color: str = "forestgreen",
+    size: float = 5,
 ) -> go.Scatter3d:  # type: ignore
     """Get a set plotly points for frustums centers.
 
@@ -470,7 +482,10 @@ def get_frustum_points(
 
 
 def get_ray_bundle_lines(
-    ray_bundle: RayBundle, length: float = 1.0, color: str = "#DC203C", width: float = 1
+    ray_bundle: RayBundle,
+    length: float = 1.0,
+    color: str = "#DC203C",
+    width: float = 1,
 ) -> go.Scatter3d:  # type: ignore
     """Get a plotly line for a ray bundle.
 

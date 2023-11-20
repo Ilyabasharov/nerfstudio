@@ -403,11 +403,13 @@ def multisampled_frustum_to_gaussian(
         device=directions.device,
         dtype=directions.dtype,
     )  # [..., 1, 3]
+
+    #TODO check if rand_vec is parallel to directions
     ortho1 = torch.nn.functional.normalize(
-        torch.cross(directions, rand_vec, dim=-1), dim=-1, eps=eps
+        torch.linalg.cross(directions, rand_vec, dim=-1), dim=-1, eps=eps
     )  # [..., num_samples, 3]
     ortho2 = torch.nn.functional.normalize(
-        torch.cross(directions, ortho1, dim=-1), dim=-1, eps=eps
+        torch.linalg.cross(directions, ortho1, dim=-1), dim=-1, eps=eps
     )  # [..., num_samples, 3]
 
     # just use directions to be the third vector of the orthonormal basis,
@@ -684,7 +686,7 @@ def linear_rgb_to_srgb(
     See https://en.wikipedia.org/wiki/SRGB. Code taken from
     https://kornia.readthedocs.io/en/latest/_modules/kornia/color/rgb.html#linear_rgb_to_rgb."""
     threshold = 0.0031308
-    rgb: torch.Tensor = torch.where(
+    rgb = torch.where(
         linear > threshold,
         1.055 * linear.clamp_min(threshold).pow(5 / 12) - 0.055,
         12.92 * linear,
@@ -701,7 +703,7 @@ def srgb_to_linear_rgb(
     See https://en.wikipedia.org/wiki/SRGB. Code taken from
     https://kornia.readthedocs.io/en/latest/_modules/kornia/color/rgb.html#rgb_to_linear_rgb."""
     threshold = 0.04045
-    linear_rgb: torch.Tensor = torch.where(
+    linear_rgb = torch.where(
         rgb > threshold,
         torch.pow(((rgb + 0.055) / 1.055), 2.4),
         rgb / 12.92,
@@ -755,10 +757,10 @@ def sorted_interp_quad(x: Tensor, xp: Tensor, fpdf: Tensor, fcdf: Tensor) -> Ten
 
 @torch_compile(dynamic=True)
 def leaky_clip(
-    x: torch.Tensor,
+    x: Tensor,
     min: float = 0.0,
     max: float = 1.0,
-) -> torch.Tensor:
+) -> Tensor:
     """
     Clip x to the range [0, 1] while still allowing gradients to 
     push it back inside the bounds. If x will be in range (0, 1)

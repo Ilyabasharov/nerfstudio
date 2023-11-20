@@ -24,7 +24,6 @@ import torch
 from torch import Tensor, nn
 
 from nerfstudio.cameras.rays import RaySamples
-from nerfstudio.field_components.activations import trunc_exp
 from nerfstudio.field_components.mlp import MLP
 from nerfstudio.field_components.spatial_distortions import SpatialDistortion
 from nerfstudio.fields.nerfacto_field import NerfactoField
@@ -225,5 +224,5 @@ class ZipNerfactoField(NerfactoField):
         # Rectifying the density with an exponential is much more stable than a ReLU or
         # softplus, because it enables high post-activation (float32) density outputs
         # from smaller internal (float16) parameters.
-        density = trunc_exp(density_before_activation.to(mean))
+        density = self.density_activation(density_before_activation.to(mean))
         return density, base_mlp_out

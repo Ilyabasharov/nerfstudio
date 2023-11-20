@@ -16,7 +16,7 @@
 Depth dataset.
 """
 
-from typing import Dict, Union, List
+from typing import Dict, Union, List, Literal
 
 import gc
 import json
@@ -34,7 +34,7 @@ from nerfstudio.model_components import losses
 from nerfstudio.data.datasets.base_dataset import InputDataset
 from nerfstudio.data.utils.data_utils import get_depth_image_from_path
 from nerfstudio.utils.rich_utils import CONSOLE
-from nerfstudio.utils.misc import torch_compile
+from nerfstudio.utils.misc import torch_compile, TORCH_DEVICE
 
 
 class DepthDataset(InputDataset):
@@ -54,15 +54,18 @@ class DepthDataset(InputDataset):
         dataparser_outputs: DataparserOutputs,
         scale_factor: float = 1.0,
         use_pseudodepth: bool = True,
+        test_mode: Literal["test", "val", "inference"] = "val",
         **kwargs,
     ):
-        super().__init__(dataparser_outputs, scale_factor)
+        super().__init__(dataparser_outputs, scale_factor, test_mode=test_mode)
         assert len(dataparser_outputs.image_filenames) > 0, "Dataparser outputs are empty."
         # if there are no depth images than we want to generate them all with zoe depth
         # or we want to use both supervision
         self.generate_preudodepth = False
 
-        if (
+        if test_mode in ("inference", "test"):
+            CONSOLE.print(f"[bold red] Turn off generating pseudodepth in {test_mode}.")
+        elif (
             "depth_filenames" not in dataparser_outputs.metadata.keys()
             or dataparser_outputs.metadata["depth_filenames"] is None
         ):
@@ -84,7 +87,6 @@ class DepthDataset(InputDataset):
                 self.depths = torch.load(cache)
             else:
                 self.depths = {}
-                device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
                 transforms = self._find_transform(dataparser_outputs.image_filenames[0])
                 data = dataparser_outputs.image_filenames[0].parent
                 if transforms is not None:
@@ -97,7 +99,8 @@ class DepthDataset(InputDataset):
                     frames = None
                     filenames = dataparser_outputs.image_filenames
 
-                pseudodepth_model = self._get_pseudodepth_model()
+                device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+                pseudodepth_model = self._get_pseudodepth_model(device=device)
 
                 for i in track(range(len(filenames)), description="Generating depth images"):
                     image_filename = filenames[i]
@@ -110,7 +113,7 @@ class DepthDataset(InputDataset):
                     if len(image.shape) == 2:
                         image = image[:, :, None].repeat(3, axis=2)
                     
-                    image = torch.from_numpy(image.astype("float32") / 255.0)
+                    image: Tensor = torch.from_numpy(image.astype("float32") / 255.0)
 
                     with torch.no_grad():
                         image = torch.permute(image, (2, 0, 1)).unsqueeze(0).to(device)
@@ -138,14 +141,16 @@ class DepthDataset(InputDataset):
 
     def _get_pseudodepth_model(
         self,
+        device: TORCH_DEVICE = "cpu",
         **kwargs,
     ) -> torch.nn.Module:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         repo = "isl-org/ZoeDepth"
         pseudodepth_model = torch_compile(
             torch.hub.load(repo, "ZoeD_NK", pretrained=True).to(device),
             mode="reduce-overhead",
         )
+
+        pseudodepth_model.eval()
 
         return pseudodepth_model
 

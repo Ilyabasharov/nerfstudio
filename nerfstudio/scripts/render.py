@@ -287,11 +287,11 @@ xmlns:GSpherical='http://ns.google.com/videos/1.0/spherical/'>
 class CropData:
     """Data for cropping an image."""
 
-    background_color: Float[Tensor, "3"] = torch.Tensor([0.0, 0.0, 0.0])
+    background_color: Float[Tensor, "3"] = torch.tensor([0.0, 0.0, 0.0])
     """background color"""
-    center: Float[Tensor, "3"] = torch.Tensor([0.0, 0.0, 0.0])
+    center: Float[Tensor, "3"] = torch.tensor([0.0, 0.0, 0.0])
     """center of the crop"""
-    scale: Float[Tensor, "3"] = torch.Tensor([2.0, 2.0, 2.0])
+    scale: Float[Tensor, "3"] = torch.tensor([2.0, 2.0, 2.0])
     """scale of the crop"""
 
 
@@ -309,9 +309,9 @@ def get_crop_from_json(camera_json: Dict[str, Any]) -> Optional[CropData]:
     bg_color = camera_json["crop"]["crop_bg_color"]
 
     return CropData(
-        background_color=torch.Tensor([bg_color["r"] / 255.0, bg_color["g"] / 255.0, bg_color["b"] / 255.0]),
-        center=torch.Tensor(camera_json["crop"]["crop_center"]),
-        scale=torch.Tensor(camera_json["crop"]["crop_scale"]),
+        background_color=torch.tensor([bg_color["r"] / 255.0, bg_color["g"] / 255.0, bg_color["b"] / 255.0]),
+        center=torch.tensor(camera_json["crop"]["crop_center"]),
+        scale=torch.tensor(camera_json["crop"]["crop_scale"]),
     )
 
 

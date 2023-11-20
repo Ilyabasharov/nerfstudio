@@ -35,6 +35,7 @@ from nerfstudio.data.datamanagers.base_datamanager import DataManager, DataManag
 from nerfstudio.data.datasets.base_dataset import InputDataset
 from nerfstudio.data.scene_box import SceneBox
 from nerfstudio.data.utils.dataloaders import RandIndicesEvalDataloader
+from nerfstudio.utils.misc import TORCH_DEVICE
 
 CONSOLE = Console(width=120)
 
@@ -47,7 +48,7 @@ class TrivialDataset(InputDataset):
         self.size = cameras.size
         self.cameras = cameras
         self.alpha_color = None
-        self.scene_box = SceneBox(torch.Tensor([[-1, -1, -1], [1, 1, 1]]))
+        self.scene_box = SceneBox(torch.tensor([[-1., -1., -1.,], [1., 1., 1.,]]))
         self.mask_filenames = None
         self.metadata = to_immutable_dict({})
 
@@ -64,7 +65,7 @@ class TrivialDataset(InputDataset):
 def random_train_pose(
     size: int,
     resolution: int,
-    device: Union[torch.device, str],
+    device: TORCH_DEVICE = "cpu",
     radius_mean: float = 1.0,
     radius_std: float = 0.1,
     central_rotation_range: Tuple[float, float] = (0, 360),
@@ -200,7 +201,7 @@ class RandomCamerasDataManager(DataManager):  # pylint: disable=abstract-method
     def __init__(
         self,
         config: RandomCamerasDataManagerConfig,
-        device: Union[torch.device, str] = "cpu",
+        device: TORCH_DEVICE = "cpu",
         test_mode: Literal["test", "val", "inference"] = "val",
         world_size: int = 1,
         local_rank: int = 0,

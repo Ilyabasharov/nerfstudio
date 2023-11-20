@@ -20,6 +20,7 @@ from typing import Callable, Dict, List, NoReturn, Optional, Tuple, TypeVar, Uni
 
 import numpy as np
 import torch
+from torch import Tensor
 
 TensorDataclassT = TypeVar("TensorDataclassT", bound="TensorDataclass")
 
@@ -106,7 +107,7 @@ class TensorDataclass:
         """
         batch_shapes = []
         for k, v in dict_.items():
-            if isinstance(v, torch.Tensor):
+            if isinstance(v, Tensor):
                 if k in self._field_custom_dimensions:
                     batch_shapes.append(v.shape[: -self._field_custom_dimensions[k]])
                 else:
@@ -128,7 +129,7 @@ class TensorDataclass:
         """
         new_dict = {}
         for k, v in dict_.items():
-            if isinstance(v, torch.Tensor):
+            if isinstance(v, Tensor):
                 # Apply field-specific custom dimensions.
                 if k in self._field_custom_dimensions:
                     new_dict[k] = v.broadcast_to(
@@ -146,7 +147,7 @@ class TensorDataclass:
         return new_dict
 
     def __getitem__(self: TensorDataclassT, indices) -> TensorDataclassT:
-        if isinstance(indices, (torch.Tensor)):
+        if isinstance(indices, (Tensor)):
             return self._apply_fn_to_fields(lambda x: x[indices])
         if isinstance(indices, (int, slice, type(Ellipsis))):
             indices = (indices,)
@@ -326,12 +327,12 @@ class TensorDataclass:
                     new_dict[f] = dataclass_fn(v)
                 # This is the case when we have a custom dimensions tensor
                 elif (
-                    isinstance(v, torch.Tensor)
+                    isinstance(v, Tensor)
                     and f in self._field_custom_dimensions
                     and custom_tensor_dims_fn is not None
                 ):
                     new_dict[f] = custom_tensor_dims_fn(f, v)
-                elif isinstance(v, (torch.Tensor, TensorDataclass)):
+                elif isinstance(v, (Tensor, TensorDataclass)):
                     new_dict[f] = fn(v)
                 elif isinstance(v, Dict):
                     new_dict[f] = self._apply_fn_to_dict(v, fn, dataclass_fn)

@@ -34,8 +34,8 @@ from torch import Tensor
 from nerfstudio.exporter.exporter_utils import Mesh, render_trajectory
 from nerfstudio.pipelines.base_pipeline import Pipeline
 from nerfstudio.utils.rich_utils import CONSOLE
+from nerfstudio.utils.misc import TORCH_DEVICE
 
-TORCH_DEVICE = Union[torch.device, str]
 
 
 @dataclass
@@ -59,7 +59,7 @@ class TSDF:
     truncation_margin: float = 5.0
     """Margin for truncation."""
 
-    def to(self, device: TORCH_DEVICE):
+    def to(self, device: TORCH_DEVICE = "cpu"):
         """Move the tensors to the specified device.
 
         Args:

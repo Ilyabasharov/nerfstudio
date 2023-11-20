@@ -23,12 +23,14 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Literal, Tuple, Type, cast
 
 import torch
+from torch import Tensor
 import torch.nn.functional as F
 from torch.nn import Parameter
 from torchmetrics.functional import structural_similarity_index_measure
 from torchmetrics.image import PeakSignalNoiseRatio
 from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 
+from nerfstudio.cameras.bundle_adjustment import HashBundleAdjustment
 from nerfstudio.cameras.rays import RayBundle
 from nerfstudio.field_components.encodings import NeRFEncoding
 from nerfstudio.field_components.field_heads import FieldHeadNames
@@ -126,6 +128,7 @@ class SurfaceModel(Model):
         if self.config.background_model == "grid":
             self.field_background = NerfactoField(
                 self.scene_box.aabb,
+                HashBundleAdjustment(False),
                 spatial_distortion=self.scene_contraction,
                 num_images=self.num_train_data,
                 use_average_appearance_embedding=self.config.use_average_appearance_embedding,
@@ -192,7 +195,7 @@ class SurfaceModel(Model):
             Outputs of model. (ie. rendered colors)
         """
 
-    def get_outputs(self, ray_bundle: RayBundle) -> Dict[str, torch.Tensor]:
+    def get_outputs(self, ray_bundle: RayBundle) -> Dict[str, Tensor]:
         """Takes in a Ray Bundle and returns a dictionary of outputs.
 
         Args:
@@ -209,8 +212,8 @@ class SurfaceModel(Model):
         samples_and_field_outputs = self.sample_and_forward_field(ray_bundle=ray_bundle)
 
         # shortcuts
-        field_outputs: Dict[FieldHeadNames, torch.Tensor] = cast(
-            Dict[FieldHeadNames, torch.Tensor], samples_and_field_outputs["field_outputs"]
+        field_outputs: Dict[FieldHeadNames, Tensor] = cast(
+            Dict[FieldHeadNames, Tensor], samples_and_field_outputs["field_outputs"]
         )
         ray_samples = samples_and_field_outputs["ray_samples"]
         weights = samples_and_field_outputs["weights"]
@@ -272,8 +275,8 @@ class SurfaceModel(Model):
             outputs.update(samples_and_field_outputs)
 
         if "weights_list" in samples_and_field_outputs:
-            weights_list = cast(List[torch.Tensor], samples_and_field_outputs["weights_list"])
-            ray_samples_list = cast(List[torch.Tensor], samples_and_field_outputs["ray_samples_list"])
+            weights_list = cast(List[Tensor], samples_and_field_outputs["weights_list"])
+            ray_samples_list = cast(List[Tensor], samples_and_field_outputs["ray_samples_list"])
 
             for i in range(len(weights_list) - 1):
                 outputs[f"prop_depth_{i}"] = self.renderer_depth(
@@ -283,7 +286,7 @@ class SurfaceModel(Model):
         outputs["normal_vis"] = (outputs["normal"] + 1.0) / 2.0
         return outputs
 
-    def get_loss_dict(self, outputs, batch, metrics_dict=None) -> Dict[str, torch.Tensor]:
+    def get_loss_dict(self, outputs, batch, metrics_dict=None) -> Dict[str, Tensor]:
         """Computes and returns the losses dict.
 
         Args:
@@ -333,7 +336,7 @@ class SurfaceModel(Model):
 
         return loss_dict
 
-    def get_metrics_dict(self, outputs, batch) -> Dict[str, torch.Tensor]:
+    def get_metrics_dict(self, outputs, batch) -> Dict[str, Tensor]:
         """Compute and returns metrics.
 
         Args:
@@ -347,8 +350,8 @@ class SurfaceModel(Model):
         return metrics_dict
 
     def get_image_metrics_and_images(
-        self, outputs: Dict[str, torch.Tensor], batch: Dict[str, torch.Tensor]
-    ) -> Tuple[Dict[str, float], Dict[str, torch.Tensor]]:
+        self, outputs: Dict[str, Tensor], batch: Dict[str, Tensor]
+    ) -> Tuple[Dict[str, float], Dict[str, Tensor]]:
         """Writes the test image outputs.
         Args:
             outputs: Outputs of the model.

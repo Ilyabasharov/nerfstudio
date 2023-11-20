@@ -44,7 +44,7 @@ class SceneBox:
         diff = self.aabb[1] - self.aabb[0]
         return self.aabb[0] + diff / 2.0
 
-    def get_centered_and_scaled_scene_box(self, scale_factor: Union[float, torch.Tensor] = 1.0):
+    def get_centered_and_scaled_scene_box(self, scale_factor: Union[float, Tensor] = 1.0):
         """Returns a new box that has been shifted and rescaled to be centered
         about the origin.
 

@@ -30,6 +30,7 @@ from torch import Tensor, nn
 from torch.cuda.amp.grad_scaler import GradScaler
 
 from nerfstudio.generative.utils import CatchMissingPackages
+from nerfstudio.utils.misc import TORCH_DEVICE
 
 
 try:
@@ -55,7 +56,12 @@ class StableDiffusion(nn.Module):
         num_train_timesteps: number of training timesteps
     """
 
-    def __init__(self, device: Union[torch.device, str], num_train_timesteps: int = 1000, version="1-5") -> None:
+    def __init__(
+        self,
+        device: TORCH_DEVICE = "cpu",
+        num_train_timesteps: int = 1000,
+        version: str = "1-5",
+    ) -> None:
         super().__init__()
 
         self.device = device
@@ -90,7 +96,9 @@ class StableDiffusion(nn.Module):
         CONSOLE.print("Stable Diffusion loaded!")
 
     def get_text_embeds(
-        self, prompt: Union[str, List[str]], negative_prompt: Union[str, List[str]]
+        self,
+        prompt: Union[str, List[str]],
+        negative_prompt: Union[str, List[str]],
     ) -> Float[Tensor, "2 max_length embed_dim"]:
         """Get text embeddings for prompt and negative prompt
         Args:
@@ -131,7 +139,7 @@ class StableDiffusion(nn.Module):
         image: Float[Tensor, "BS 3 H W"],
         guidance_scale: float = 100.0,
         grad_scaler: Optional[GradScaler] = None,
-    ) -> torch.Tensor:
+    ) -> Tensor:
         """Score Distilation Sampling loss proposed in DreamFusion paper (https://dreamfusion3d.github.io/)
         Args:
             text_embeddings: Text embeddings

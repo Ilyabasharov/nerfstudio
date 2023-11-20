@@ -57,6 +57,19 @@ class AdamOptimizerConfig(OptimizerConfig):
     """Basic optimizer config with Adam"""
 
     _target: Type = torch.optim.Adam
+    amsgrad: bool = True
+    """Whether to use amsgrad or not."""
+    weight_decay: float = 0
+    """The weight decay to use."""
+
+
+@dataclass
+class AdamWOptimizerConfig(OptimizerConfig):
+    """Basic optimizer config with AdamW"""
+
+    _target: Type = torch.optim.AdamW
+    amsgrad: bool = True
+    """Whether to use amsgrad or not."""
     weight_decay: float = 0
     """The weight decay to use."""
 
@@ -67,8 +80,8 @@ class RAdamOptimizerConfig(OptimizerConfig):
 
     _target: Type = torch.optim.RAdam
     weight_decay: float = 0
-    decoupled_weight_decay: bool = True
     """The weight decay to use."""
+    decoupled_weight_decay: bool = True
 
 
 class Optimizers:

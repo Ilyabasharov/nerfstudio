@@ -66,7 +66,7 @@ class SceneContraction(SpatialDistortion):
         self.order = order
 
     def forward(self, positions):
-        def contract(x: torch.Tensor) -> torch.Tensor:
+        def contract(x: Tensor) -> Tensor:
             """MipNeRF contraction function"""
             mag = torch.linalg.norm(x, ord=self.order, dim=-1)[..., None]
             return torch.where(mag < 1, x, (2 - (1 / mag)) * (x / mag))
@@ -74,7 +74,7 @@ class SceneContraction(SpatialDistortion):
         if isinstance(positions, Gaussians):
             means = contract(positions.mean.clone())
 
-            def contract_gauss(x: torch.Tensor) -> torch.Tensor:
+            def contract_gauss(x: Tensor) -> Tensor:
                 mag = torch.linalg.norm(x, ord=self.order, dim=-1, keepdim=True)
                 return (2 - 1 / mag) * (x / mag)
 

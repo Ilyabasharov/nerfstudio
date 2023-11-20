@@ -22,6 +22,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Tuple, Type
 
 import torch
+from torch import Tensor
 from torch.nn import Parameter
 from torchmetrics.functional import structural_similarity_index_measure
 from torchmetrics.image import PeakSignalNoiseRatio
@@ -53,7 +54,6 @@ class VanillaModelConfig(ModelConfig):
     """Number of samples in coarse field evaluation"""
     num_importance_samples: int = 128
     """Number of samples in fine field evaluation"""
-
     enable_temporal_distortion: bool = False
     """Specifies whether or not to include ray warping based on time."""
     temporal_distortion_params: Dict[str, Any] = to_immutable_dict({"kind": TemporalDistortionKind.DNERF})
@@ -165,7 +165,10 @@ class NeRFModel(Model):
         if self.temporal_distortion is not None:
             offsets = None
             if ray_samples_pdf.times is not None:
-                offsets = self.temporal_distortion(ray_samples_pdf.frustums.get_positions(), ray_samples_pdf.times)
+                offsets = self.temporal_distortion(
+                    ray_samples_pdf.frustums.get_positions(),
+                    ray_samples_pdf.times,
+                )
             ray_samples_pdf.frustums.set_offsets(offsets)
 
         # fine field:
@@ -188,7 +191,7 @@ class NeRFModel(Model):
         }
         return outputs
 
-    def get_loss_dict(self, outputs, batch, metrics_dict=None) -> Dict[str, torch.Tensor]:
+    def get_loss_dict(self, outputs, batch, metrics_dict=None) -> Dict[str, Tensor]:
         # Scaling metrics by coefficients to create the losses.
         device = outputs["rgb_coarse"].device
         image = batch["image"].to(device)
@@ -211,8 +214,8 @@ class NeRFModel(Model):
         return loss_dict
 
     def get_image_metrics_and_images(
-        self, outputs: Dict[str, torch.Tensor], batch: Dict[str, torch.Tensor]
-    ) -> Tuple[Dict[str, float], Dict[str, torch.Tensor]]:
+        self, outputs: Dict[str, Tensor], batch: Dict[str, Tensor]
+    ) -> Tuple[Dict[str, float], Dict[str, Tensor]]:
         image = batch["image"].to(outputs["rgb_coarse"].device)
         image = self.renderer_rgb.blend_background(image)
         rgb_coarse = outputs["rgb_coarse"]
@@ -246,7 +249,7 @@ class NeRFModel(Model):
         fine_psnr = self.psnr(image, rgb_fine)
         fine_ssim = self.ssim(image, rgb_fine)
         fine_lpips = self.lpips(image, rgb_fine)
-        assert isinstance(fine_ssim, torch.Tensor)
+        assert isinstance(fine_ssim, Tensor)
 
         metrics_dict = {
             "psnr": float(fine_psnr.item()),

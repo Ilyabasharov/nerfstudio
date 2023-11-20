@@ -23,6 +23,7 @@ from typing import Dict, List, Optional, Tuple, Type
 
 import numpy as np
 import torch
+from torch import Tensor
 from torch.nn import Parameter
 from typing_extensions import Literal
 
@@ -193,7 +194,9 @@ class GenerfactoModel(Model):
         self.front_prompt = config.front_prompt
 
         self.diffusion_device = (
-            torch.device(kwargs["device"]) if config.diffusion_device is None else torch.device(config.diffusion_device)
+            torch.device(kwargs["device"])
+            if config.diffusion_device is None
+            else torch.device(config.diffusion_device)
         )
 
         super().__init__(config=config, **kwargs)
@@ -265,7 +268,7 @@ class GenerfactoModel(Model):
 
         # colliders
         if self.config.sphere_collider:
-            self.collider = SphereCollider(torch.Tensor([0, 0, 0]), 1.0)
+            self.collider = SphereCollider(torch.tensor([0., 0., 0.]), 1.0)
         else:
             self.collider = AABBBoxCollider(scene_box=self.scene_box)
 
@@ -445,7 +448,7 @@ class GenerfactoModel(Model):
 
         return outputs
 
-    def get_loss_dict(self, outputs, batch, metrics_dict=None) -> Dict[str, torch.Tensor]:
+    def get_loss_dict(self, outputs, batch, metrics_dict=None) -> Dict[str, Tensor]:
         # Scaling metrics by coefficients to create the losses.
 
         loss_dict = {}
@@ -500,8 +503,8 @@ class GenerfactoModel(Model):
         return loss_dict
 
     def get_image_metrics_and_images(
-        self, outputs: Dict[str, torch.Tensor], batch: Dict[str, torch.Tensor]
-    ) -> Tuple[Dict[str, float], Dict[str, torch.Tensor]]:
+        self, outputs: Dict[str, Tensor], batch: Dict[str, Tensor]
+    ) -> Tuple[Dict[str, float], Dict[str, Tensor]]:
         acc = colormaps.apply_colormap(outputs["accumulation"])
         depth = colormaps.apply_depth_colormap(
             outputs["depth"],

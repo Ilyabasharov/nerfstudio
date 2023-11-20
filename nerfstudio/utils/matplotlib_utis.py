@@ -84,13 +84,12 @@ def plot_weights_distribution(
 
     return fig
 
-
+@torch.no_grad()
 def plot_weights_distribution_multiprop(
     weights: List[Float[Tensor, "num_samples 1"]],
     steps: List[Float[Tensor, "num_samples 1"]],
     i: int,
     termination_depth: Optional[Float[Tensor, "num_samples 1"]] = None,
-
 ) -> Figure:
     """Plots weights and optionally ground truth depth on one figure.
     Args:

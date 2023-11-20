@@ -6,6 +6,7 @@ from typing import Generic, Optional, TypeVar
 
 import pytest
 import torch
+from torch import Tensor
 
 from nerfstudio.utils.tensor_dataclass import TensorDataclass
 
@@ -14,7 +15,7 @@ from nerfstudio.utils.tensor_dataclass import TensorDataclass
 class DummyNestedClass(TensorDataclass):
     """Dummy dataclass"""
 
-    x: torch.Tensor
+    x: Tensor
 
 
 MaybeTensorDataclass = TypeVar("MaybeTensorDataclass")
@@ -24,8 +25,8 @@ MaybeTensorDataclass = TypeVar("MaybeTensorDataclass")
 class DummyTensorDataclass(TensorDataclass, Generic[MaybeTensorDataclass]):
     """Dummy dataclass"""
 
-    a: torch.Tensor
-    b: torch.Tensor
+    a: Tensor
+    b: Tensor
     c: MaybeTensorDataclass
     d: dict = field(default_factory=dict)
 
@@ -37,7 +38,7 @@ def test_init():
     class Dummy(TensorDataclass):
         """Dummy dataclass"""
 
-        dummy_vals: Optional[torch.Tensor] = None
+        dummy_vals: Optional[Tensor] = None
 
     Dummy(dummy_vals=torch.ones(1))
     with pytest.raises(ValueError):

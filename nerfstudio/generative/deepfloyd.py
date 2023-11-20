@@ -27,6 +27,7 @@ from torch.cuda.amp.grad_scaler import GradScaler
 
 
 from nerfstudio.generative.utils import CatchMissingPackages
+from nerfstudio.utils.misc import TORCH_DEVICE
 
 try:
     from diffusers import IFPipeline as IFOrig
@@ -48,7 +49,7 @@ class DeepFloyd(nn.Module):
         device: device to use
     """
 
-    def __init__(self, device: Union[torch.device, str]):
+    def __init__(self, device: TORCH_DEVICE = "cpu"):
         super().__init__()
         self.device = device
 
@@ -145,7 +146,7 @@ class DeepFloyd(nn.Module):
         image: Float[Tensor, "BS 3 H W"],
         guidance_scale: float = 100.0,
         grad_scaler: Optional[GradScaler] = None,
-    ) -> torch.Tensor:
+    ) -> Tensor:
         """Score Distilation Sampling loss proposed in DreamFusion paper (https://dreamfusion3d.github.io/)
         Args:
             text_embeddings: Text embeddings
@@ -221,7 +222,11 @@ class DeepFloyd(nn.Module):
 
 
 def generate_image(
-    prompt: str, negative: str = "", seed: int = 0, steps: int = 50, save_path: Path = Path("test_deepfloyd.png")
+    prompt: str,
+    negative: str = "",
+    seed: int = 0,
+    steps: int = 50,
+    save_path: Path = Path("test_deepfloyd.png"),
 ):
     """Generate an image from a prompt using DeepFloyd IF.
     Args:

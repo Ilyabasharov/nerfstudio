@@ -31,6 +31,7 @@ def exp_map_SO3xR3(
 
     Args:
         tangent_vector: Tangent vector; length-3 translations, followed by an `so(3)` tangent vector.
+        eps: Small value.
     Returns:
         [R|t] transformation matrices.
     """
@@ -62,14 +63,17 @@ def exp_map_SO3xR3(
     return ret
 
 
-def exp_map_SE3(tangent_vector: Float[Tensor, "b 6"]) -> Float[Tensor, "b 3 4"]:
+def exp_map_SE3(
+    tangent_vector: Float[Tensor, "b 6"],
+    eps: float = 1e-2,
+) -> Float[Tensor, "b 3 4"]:
     """Compute the exponential map `se(3) -> SE(3)`.
 
     This can be used for learning pose deltas on `SE(3)`.
 
     Args:
         tangent_vector: A tangent vector from `se(3)`.
-
+        eps: Small value.
     Returns:
         [R|t] transformation matrices.
     """
@@ -77,12 +81,12 @@ def exp_map_SE3(tangent_vector: Float[Tensor, "b 6"]) -> Float[Tensor, "b 3 4"]:
     tangent_vector_lin = tangent_vector[:, :3].view(-1, 3, 1)
     tangent_vector_ang = tangent_vector[:, 3:].view(-1, 3, 1)
 
-    theta = torch.linalg.norm(tangent_vector_ang, dim=1).unsqueeze(1)
+    theta = torch.linalg.norm(tangent_vector_ang, dim=1, keepdim=True)
     theta2 = theta**2
     theta3 = theta**3
 
-    near_zero = theta < 1e-2
-    non_zero = torch.ones(1, dtype=tangent_vector.dtype, device=tangent_vector.device)
+    near_zero = theta < eps
+    non_zero = tangent_vector.new_ones(1)
     theta_nz = torch.where(near_zero, non_zero, theta)
     theta2_nz = torch.where(near_zero, non_zero, theta2)
     theta3_nz = torch.where(near_zero, non_zero, theta3)
@@ -112,7 +116,7 @@ def exp_map_SE3(tangent_vector: Float[Tensor, "b 6"]) -> Float[Tensor, "b 3 4"]:
     theta_minus_sine_by_theta3_t = torch.where(near_zero, 1.0 / 6 - theta2 / 120, (theta - sine) / theta3_nz)
 
     ret[:, :, 3:] = sine_by_theta * tangent_vector_lin
-    ret[:, :, 3:] += one_minus_cosine_by_theta2 * torch.cross(tangent_vector_ang, tangent_vector_lin, dim=1)
+    ret[:, :, 3:] += one_minus_cosine_by_theta2 * torch.linalg.cross(tangent_vector_ang, tangent_vector_lin, dim=1)
     ret[:, :, 3:] += theta_minus_sine_by_theta3_t * (
         tangent_vector_ang @ (tangent_vector_ang.transpose(1, 2) @ tangent_vector_lin)
     )

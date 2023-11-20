@@ -820,10 +820,11 @@ class SHEncoding(Encoding):
 
         self.levels = levels
 
-        self.tcnn_encoding = None
         if implementation == "tcnn" and not TCNN_EXISTS:
             print_tcnn_speed_warning("SHEncoding")
-        elif implementation == "tcnn":
+            implementation = "torch"
+
+        if implementation == "tcnn":
             encoding_config = {
                 "otype": "SphericalHarmonics",
                 "degree": levels,
@@ -832,6 +833,9 @@ class SHEncoding(Encoding):
                 n_input_dims=3,
                 encoding_config=encoding_config,
             )
+            self.she_encoding_fwd = self.tcnn_encoding.forward
+        elif implementation == "torch":
+            self.she_encoding_fwd = self.pytorch_fwd
 
     def get_out_dim(self) -> int:
         return self.levels**2
@@ -840,11 +844,9 @@ class SHEncoding(Encoding):
     def pytorch_fwd(self, in_tensor: Float[Tensor, "*bs input_dim"]) -> Float[Tensor, "*bs output_dim"]:
         """Forward pass using pytorch. Significantly slower than TCNN implementation."""
         return components_from_spherical_harmonics(levels=self.levels, directions=in_tensor)
-
+    
     def forward(self, in_tensor: Float[Tensor, "*bs input_dim"]) -> Float[Tensor, "*bs output_dim"]:
-        if self.tcnn_encoding is not None:
-            return self.tcnn_encoding(in_tensor)
-        return self.pytorch_fwd(in_tensor)
+        return self.she_encoding_fwd(in_tensor)
     
 
 class IDEncoding(SHEncoding):
@@ -857,10 +859,7 @@ class IDEncoding(SHEncoding):
 
     harmonic_counts: List[int] = [1, 3, 5, 7, 9, 11, 13, 15]
 
-    def __init__(self, levels: int = 4, implementation: Literal["tcnn", "torch"] = "torch") -> None:
-        if implementation != "torch":
-            raise NotImplementedError(f"Only torch now supported, got {implementation}")
-        
+    def __init__(self, levels: int = 4, implementation: Literal["tcnn", "torch"] = "tcnn") -> None:
         super().__init__(levels=levels, implementation=implementation)
 
         levels_count = torch.tensor([
@@ -887,5 +886,7 @@ class IDEncoding(SHEncoding):
         # Apply attenuation function using the von Mises-Fisher distribution
         # concentration parameter, kappa.
         attenuation = trunc_exp(-roughness * self.sigma)
-        harmonics = components_from_spherical_harmonics(self.levels, in_tensor)
+        
+        # generate she harmonics
+        harmonics = self.she_encoding_fwd(in_tensor)
         return harmonics * attenuation

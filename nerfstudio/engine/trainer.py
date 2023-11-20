@@ -27,6 +27,7 @@ from threading import Lock
 from typing import Dict, List, Literal, Optional, Tuple, Type, cast
 
 import torch
+from torch import Tensor
 from rich import box, style
 from rich.panel import Panel
 from rich.table import Table
@@ -45,8 +46,7 @@ from nerfstudio.utils.writer import EventName, TimeWriter
 from nerfstudio.viewer.server.viewer_state import ViewerState
 from nerfstudio.viewer_beta.viewer import Viewer as ViewerBetaState
 
-TRAIN_INTERATION_OUTPUT = Tuple[torch.Tensor, Dict[str, torch.Tensor], Dict[str, torch.Tensor]]
-TORCH_DEVICE = str
+TRAIN_INTERATION_OUTPUT = Tuple[Tensor, Dict[str, Tensor], Dict[str, Tensor]]
 
 
 @dataclass
@@ -114,12 +114,17 @@ class Trainer:
         self.config = config
         self.local_rank = local_rank
         self.world_size = world_size
-        self.device: TORCH_DEVICE = config.machine.device_type
+        self.device: str = config.machine.device_type
         if self.device == "cuda":
             self.device += f":{local_rank}"
         self.mixed_precision: bool = self.config.mixed_precision
         self.use_grad_scaler: bool = self.mixed_precision or self.config.use_grad_scaler
         self.training_state: Literal["training", "paused", "completed"] = "training"
+
+        # checks gradient_accumulation_steps
+        assert (
+            self.config.gradient_accumulation_steps > 0
+        ), f"gradient_accumulation_steps must be > 0, not {self.config.gradient_accumulation_steps}"
         self.gradient_accumulation_steps: int = self.config.gradient_accumulation_steps
 
         if self.device == "cpu":
@@ -477,9 +482,6 @@ class Trainer:
 
         self.optimizers.zero_grad_all()
         cpu_or_cuda_str: str = self.device.split(":")[0]
-        assert (
-            self.gradient_accumulation_steps > 0
-        ), f"gradient_accumulation_steps must be > 0, not {self.gradient_accumulation_steps}"
         for _ in range(self.gradient_accumulation_steps):
             with torch.autocast(device_type=cpu_or_cuda_str, enabled=self.mixed_precision):
                 _, loss_dict, metrics_dict = self.pipeline.get_train_loss_dict(step=step)
@@ -497,7 +499,7 @@ class Trainer:
                     metrics_dict[f"Gradients/{tag}"] = grad  # type: ignore
                     total_grad += grad
 
-            metrics_dict["Gradients/Total"] = cast(torch.Tensor, total_grad)  # type: ignore
+            metrics_dict["Gradients/Total"] = cast(Tensor, total_grad)  # type: ignore
 
         scale = self.grad_scaler.get_scale()
         self.grad_scaler.update()

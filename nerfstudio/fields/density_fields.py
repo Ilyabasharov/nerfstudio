@@ -65,6 +65,7 @@ class HashMLPDensityField(Field):
         features_per_level: int = 2,
         regularize_function: Callable[[Tensor], Tensor] = torch.square,
         compute_hash_regularization: bool = False,
+        density_activation: Callable[[Tensor], Tensor] = lambda x: trunc_exp(x - 1),
         implementation: Literal["tcnn", "torch"] = "torch",
     ) -> None:
         super().__init__()
@@ -73,6 +74,7 @@ class HashMLPDensityField(Field):
         self.use_linear = use_linear
         self.regularize_function = regularize_function
         self.compute_hash_regularization = compute_hash_regularization
+        self.density_activation = density_activation
 
         self.register_buffer("max_res", torch.tensor(max_res))
         self.register_buffer("num_levels", torch.tensor(num_levels))
@@ -117,7 +119,7 @@ class HashMLPDensityField(Field):
         # Rectifying the density with an exponential is much more stable than a ReLU or
         # softplus, because it enables high post-activation (float32) density outputs
         # from smaller internal (float16) parameters.
-        density = trunc_exp(density_before_activation)
+        density = self.density_activation(density_before_activation)
         density = density * selector[..., None]
         return density, None
 
@@ -250,5 +252,5 @@ class HashMLPGaussianDensityField(HashMLPDensityField):
         # Rectifying the density with an exponential is much more stable than a ReLU or
         # softplus, because it enables high post-activation (float32) density outputs
         # from smaller internal (float16) parameters.
-        density = trunc_exp(density_before_activation.to(mean))
+        density = self.density_activation(density_before_activation.to(mean))
         return density, None

@@ -207,7 +207,7 @@ def generate_mesh_with_multires_marching_cubes(
                 points = torch.tensor(np.vstack([xx.ravel(), yy.ravel(), zz.ravel()]).T, dtype=torch.float).cuda()
 
                 # Function to evaluate SDF for a batch of points
-                def evaluate(points: torch.Tensor) -> torch.Tensor:
+                def evaluate(points: Tensor) -> Tensor:
                     return evaluate_sdf(geometry_callable_field, points)
 
                 # Construct point pyramids

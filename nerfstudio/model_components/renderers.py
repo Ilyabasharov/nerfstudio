@@ -38,6 +38,7 @@ from torch import Tensor, nn
 from nerfstudio.cameras.rays import RaySamples
 from nerfstudio.utils import colors
 from nerfstudio.utils.math import components_from_spherical_harmonics, safe_normalize
+from nerfstudio.utils.misc import TORCH_DEVICE, torch_compile
 
 BackgroundColor = Union[Literal["random", "last_sample", "black", "white"], Float[Tensor, "3"], Float[Tensor, "*bs 3"]]
 BACKGROUND_COLOR_OVERRIDE: Optional[Float[Tensor, "3"]] = None
@@ -100,7 +101,7 @@ class RGBRenderer(nn.Module):
             )
         else:
             comp_rgb = torch.sum(weights * rgb, dim=-2)
-            accumulated_weight = torch.sum(weights, dim=-2)
+            accumulated_weight = weights.sum(dim=-2)
 
         if background_color == "random":
             # If background color is random, the predicted color is returned without blending,
@@ -112,13 +113,16 @@ class RGBRenderer(nn.Module):
             background_color = rgb[..., -1, :]
         else:
             background_color = cls.get_background_color(background_color, shape=comp_rgb.shape, device=comp_rgb.device)
-        assert isinstance(background_color, torch.Tensor)
+        assert isinstance(background_color, Tensor)
         comp_rgb = comp_rgb + background_color * (1.0 - accumulated_weight)
         return comp_rgb
 
     @classmethod
     def get_background_color(
-        cls, background_color: BackgroundColor, shape: Tuple[int, ...], device: torch.device
+        cls,
+        background_color: BackgroundColor,
+        shape: Tuple[int, ...],
+        device: TORCH_DEVICE,
     ) -> Union[Float[Tensor, "3"], Float[Tensor, "*bs 3"]]:
         """Returns the RGB background color for a specified background color.
 
@@ -168,7 +172,7 @@ class RGBRenderer(nn.Module):
             if background_color in {"last_sample", "random"}:
                 background_color = "black"
         background_color = self.get_background_color(background_color, shape=rgb.shape, device=rgb.device)
-        assert isinstance(background_color, torch.Tensor)
+        assert isinstance(background_color, Tensor)
         return rgb * opacity + background_color.to(rgb.device) * (1 - opacity)
 
     def blend_background_for_loss_computation(
@@ -225,7 +229,7 @@ class RGBRenderer(nn.Module):
             rgb, weights, background_color=background_color, ray_indices=ray_indices, num_rays=num_rays
         )
         if not self.training:
-            torch.clamp_(rgb, min=0.0, max=1.0)
+            rgb.clamp_(min=0.0, max=1.0)
         return rgb
 
 
@@ -269,7 +273,7 @@ class SHRenderer(nn.Module):
         components = components_from_spherical_harmonics(levels=levels, directions=directions)
 
         rgb = sh * components[..., None, :]  # [..., num_samples, 3, sh_components]
-        rgb = torch.sum(rgb, dim=-1)  # [..., num_samples, 3]
+        rgb = rgb.sum(dim=-1)  # [..., num_samples, 3]
 
         if self.activation is not None:
             rgb = self.activation(rgb)
@@ -278,7 +282,7 @@ class SHRenderer(nn.Module):
             rgb = torch.nan_to_num(rgb)
         rgb = RGBRenderer.combine_rgb(rgb, weights, background_color=self.background_color)
         if not self.training:
-            torch.clamp_(rgb, min=0.0, max=1.0)
+            rgb.clamp_(min=0.0, max=1.0)
 
         return rgb
 
@@ -325,22 +329,27 @@ class DepthRenderer(nn.Module):
         method: Depth calculation method.
     """
 
-    __constants__ = ["method"]
-    method: str
-
     def __init__(
         self,
         method: Literal["median", "expected"] = "median",
     ) -> None:
         super().__init__()
-        self.method = method
 
-    def forward(
+        if method == "median":
+            self.forward = self.median_fwd
+        elif method == "expected":
+            self.forward = self.expected_fwd
+        else:
+            NotImplementedError(f"Method {method} not implemented")
+
+    @torch_compile(dynamic=True, mode="reduce-overhead")
+    def median_fwd(
         self,
         weights: Float[Tensor, "*batch num_samples 1"],
         ray_samples: RaySamples,
         ray_indices: Optional[Int[Tensor, "num_samples"]] = None,
         num_rays: Optional[int] = None,
+        eps: float = 1e-10,
     ) -> Float[Tensor, "*batch 1"]:
         """Composite samples along ray and calculate depths.
 
@@ -354,44 +363,59 @@ class DepthRenderer(nn.Module):
             Outputs of depth values.
         """
 
-        if self.method == "median":
-            steps = (ray_samples.frustums.starts + ray_samples.frustums.ends) / 2
+        steps = ray_samples.frustums.get_steps()
+        if ray_indices is not None and num_rays is not None:
+            raise NotImplementedError("Median depth calculation is not implemented for packed samples.")
+        cumulative_weights = weights[..., 0].cumsum(dim=-1)  # [..., num_samples]
+        split = weights.new_full((*weights.shape[:-2], 1), fill_value=0.5)  # [..., 1]
+        median_index = torch.searchsorted(cumulative_weights, split, side="left")  # [..., 1]
+        median_index.clamp_(0, steps.shape[-2] - 1)  # [..., 1]
+        median_depth = steps[..., 0].gather(dim=-1, index=median_index)  # [..., 1]
+        return median_depth
+    
+    def expected_fwd(
+        self,
+        weights: Float[Tensor, "*batch num_samples 1"],
+        ray_samples: RaySamples,
+        ray_indices: Optional[Int[Tensor, "num_samples"]] = None,
+        num_rays: Optional[int] = None,
+        eps: float = 1e-10,
+    ) -> Float[Tensor, "*batch 1"]:
+        """Composite samples along ray and calculate depths.
 
-            if ray_indices is not None and num_rays is not None:
-                raise NotImplementedError("Median depth calculation is not implemented for packed samples.")
-            cumulative_weights = torch.cumsum(weights[..., 0], dim=-1)  # [..., num_samples]
-            split = torch.ones((*weights.shape[:-2], 1), device=weights.device) * 0.5  # [..., 1]
-            median_index = torch.searchsorted(cumulative_weights, split, side="left")  # [..., 1]
-            median_index = torch.clamp(median_index, 0, steps.shape[-2] - 1)  # [..., 1]
-            median_depth = torch.gather(steps[..., 0], dim=-1, index=median_index)  # [..., 1]
-            return median_depth
-        if self.method == "expected":
-            eps = 1e-10
-            steps = (ray_samples.frustums.starts + ray_samples.frustums.ends) / 2
+        Args:
+            weights: Weights for each sample.
+            ray_samples: Set of ray samples.
+            ray_indices: Ray index for each sample, used when samples are packed.
+            num_rays: Number of rays, used when samples are packed.
 
-            if ray_indices is not None and num_rays is not None:
-                # Necessary for packed samples from volumetric ray sampler
-                depth = nerfacc.accumulate_along_rays(
-                    weights[..., 0], values=steps, ray_indices=ray_indices, n_rays=num_rays
-                )
-                accumulation = nerfacc.accumulate_along_rays(
-                    weights[..., 0], values=None, ray_indices=ray_indices, n_rays=num_rays
-                )
-                depth = depth / (accumulation + eps)
-            else:
-                depth = torch.sum(weights * steps, dim=-2) / (torch.sum(weights, -2) + eps)
+        Returns:
+            Outputs of depth values.
+        """
+        steps = ray_samples.frustums.get_steps()
 
-            depth = torch.clip(depth, steps.min(), steps.max())
+        if ray_indices is not None and num_rays is not None:
+            # Necessary for packed samples from volumetric ray sampler
+            depth = nerfacc.accumulate_along_rays(
+                weights[..., 0], values=steps, ray_indices=ray_indices, n_rays=num_rays
+            )
+            accumulation = nerfacc.accumulate_along_rays(
+                weights[..., 0], values=None, ray_indices=ray_indices, n_rays=num_rays
+            ).clamp_min_(eps)
+            depth = depth / accumulation
+        else:
+            depth = torch.sum(weights * steps, dim=-2) / weights.sum(dim=-2).clamp_min_(eps)
 
-            return depth
+        depth = depth.clip_(steps.min(), steps.max())
 
-        raise NotImplementedError(f"Method {self.method} not implemented")
+        return depth
 
 
 class UncertaintyRenderer(nn.Module):
     """Calculate uncertainty along the ray."""
 
     @classmethod
+    @torch_compile(dynamic=True, mode="reduce-overhead")
     def forward(
         cls,
         betas: Float[Tensor, "*bs num_samples 1"],
@@ -458,6 +482,7 @@ class RoughnessRenderer(nn.Module):
     """Calculate roughness along the ray."""
 
     @classmethod
+    @torch_compile(dynamic=True, mode="reduce-overhead")
     def forward(
         cls,
         roughness: Float[Tensor, "*bs num_samples 1"],

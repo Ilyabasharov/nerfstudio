@@ -19,6 +19,7 @@ from typing import List, Optional, Tuple, Union
 
 import numpy as np
 import torch
+from torch import Tensor
 from typing_extensions import assert_never
 
 from nerfstudio.viewer.viser.messages import CameraMessage
@@ -71,7 +72,7 @@ def get_intrinsics_matrix_and_camera_to_world_h(
     camera_message: CameraMessage,
     image_height: int,
     image_width: Optional[Numeric] = None,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> Tuple[Tensor, Tensor]:
     """Returns the camera intrinsics matrix and the camera to world homogeneous matrix.
 
     Args:

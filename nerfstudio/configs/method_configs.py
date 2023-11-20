@@ -45,7 +45,11 @@ from nerfstudio.data.dataparsers.sitcoms3d_dataparser import Sitcoms3DDataParser
 from nerfstudio.data.datasets.depth_dataset import DepthDataset
 from nerfstudio.data.datasets.sdf_dataset import SDFDataset
 from nerfstudio.data.datasets.semantic_dataset import SemanticDataset
-from nerfstudio.engine.optimizers import AdamOptimizerConfig, RAdamOptimizerConfig
+from nerfstudio.engine.optimizers import (
+    AdamOptimizerConfig,
+    RAdamOptimizerConfig,
+    AdamWOptimizerConfig,
+)
 from nerfstudio.engine.schedulers import (
     CosineDecaySchedulerConfig,
     ExponentialDecaySchedulerConfig,
@@ -108,7 +112,7 @@ method_configs["nerfacto"] = TrainerConfig(
             eval_num_rays_per_batch=4096,
             pose_optimizer=PoseOptimizerConfig(
                 mode="SO3xR3",
-                optimizer=RAdamOptimizerConfig(lr=6e-4, eps=1e-8, weight_decay=1e-2),
+                optimizer=AdamWOptimizerConfig(lr=6e-4, eps=1e-8, weight_decay=1e-2),
                 scheduler=ExponentialDecaySchedulerConfig(lr_final=6e-6, max_steps=200000),
             ),
         ),
@@ -116,11 +120,11 @@ method_configs["nerfacto"] = TrainerConfig(
     ),
     optimizers={
         "proposal_networks": {
-            "optimizer": RAdamOptimizerConfig(lr=1e-2, eps=1e-15),
+            "optimizer": AdamWOptimizerConfig(lr=1e-2, eps=1e-15),
             "scheduler": ExponentialDecaySchedulerConfig(lr_final=0.0001, max_steps=200000),
         },
         "fields": {
-            "optimizer": RAdamOptimizerConfig(lr=1e-2, eps=1e-15),
+            "optimizer": AdamWOptimizerConfig(lr=1e-2, eps=1e-15),
             "scheduler": ExponentialDecaySchedulerConfig(lr_final=0.0001, max_steps=200000),
         },
     },
@@ -140,7 +144,7 @@ method_configs["nerfacto-big"] = TrainerConfig(
             eval_num_rays_per_batch=4096,
             pose_optimizer=PoseOptimizerConfig(
                 mode="SO3xR3",
-                optimizer=RAdamOptimizerConfig(lr=6e-4, eps=1e-8, weight_decay=1e-3),
+                optimizer=AdamWOptimizerConfig(lr=6e-4, eps=1e-8, weight_decay=1e-3),
             ),
         ),
         model=NerfactoModelConfig(
@@ -157,11 +161,11 @@ method_configs["nerfacto-big"] = TrainerConfig(
     ),
     optimizers={
         "proposal_networks": {
-            "optimizer": RAdamOptimizerConfig(lr=1e-2, eps=1e-15),
+            "optimizer": AdamWOptimizerConfig(lr=1e-2, eps=1e-15),
             "scheduler": None,
         },
         "fields": {
-            "optimizer": RAdamOptimizerConfig(lr=1e-2, eps=1e-15),
+            "optimizer": AdamWOptimizerConfig(lr=1e-2, eps=1e-15),
             "scheduler": ExponentialDecaySchedulerConfig(lr_final=1e-4, max_steps=50000),
         },
     },
@@ -176,82 +180,95 @@ method_configs["nerfacto-huge"] = TrainerConfig(
     mixed_precision=True,
     pipeline=VanillaPipelineConfig(
         datamanager=VanillaDataManagerConfig(
-            dataparser=NerfstudioDataParserConfig(),
-            train_num_rays_per_batch=16384,
+            dataparser=NerfstudioDataParserConfig(train_split_fraction=0.998),
+            train_num_rays_per_batch=10384,
             eval_num_rays_per_batch=4096,
             pose_optimizer=PoseOptimizerConfig(
                 mode="SO3xR3",
-                optimizer=RAdamOptimizerConfig(lr=6e-4, eps=1e-8, weight_decay=1e-3),
+                optimizer=AdamWOptimizerConfig(lr=6e-4, eps=1e-8, weight_decay=1e-3),
                 scheduler=ExponentialDecaySchedulerConfig(lr_final=6e-5, max_steps=50000),
             ),
         ),
         model=NerfactoModelConfig(
             eval_num_rays_per_chunk=1 << 15,
             num_nerf_samples_per_ray=64,
-            num_proposal_samples_per_ray=(512, 512),
+            num_proposal_samples_per_ray=(256, 256),
             proposal_net_args_list=[
-                {"hidden_dim": 16, "log2_hashmap_size": 17, "num_levels": 5, "max_res": 512, "use_linear": False},
-                {"hidden_dim": 16, "log2_hashmap_size": 17, "num_levels": 7, "max_res": 2048, "use_linear": False},
+                {"hidden_dim": 128, "log2_hashmap_size": 17, "num_levels": 5, "max_res": 512, "use_linear": False, "features_per_level": 4},
+                {"hidden_dim": 128, "log2_hashmap_size": 17, "num_levels": 7, "max_res": 2048, "use_linear": False, "features_per_level": 4},
             ],
-            hidden_dim=256,
-            hidden_dim_color=256,
-            appearance_embed_dim=32,
+            hidden_dim=512,
+            hidden_dim_color=512,
+            appearance_embed_dim=128,
             max_res=8192,
             proposal_weights_anneal_max_num_iters=5000,
-            log2_hashmap_size=21,
+            log2_hashmap_size=22,
         ),
     ),
     optimizers={
         "proposal_networks": {
-            "optimizer": RAdamOptimizerConfig(lr=1e-2, eps=1e-15),
-            "scheduler": None,
+            "optimizer": AdamWOptimizerConfig(lr=6e-3, eps=1e-15),
+            "scheduler": ExponentialDecaySchedulerConfig(
+                delay_steps=15000,
+                lr_pre_warmup=6e-3,
+                max_steps=120000,
+                lr_final=5e-5,
+            ),
         },
         "fields": {
-            "optimizer": RAdamOptimizerConfig(lr=1e-2, eps=1e-15),
-            "scheduler": ExponentialDecaySchedulerConfig(lr_final=1e-4, max_steps=50000),
+            "optimizer": AdamWOptimizerConfig(lr=6e-3, eps=1e-15),
+            "scheduler": ExponentialDecaySchedulerConfig(
+                delay_steps=15000,
+                lr_pre_warmup=6e-3,
+                max_steps=120000,
+                lr_final=5e-5,
+            ),
         },
     },
     viewer=ViewerConfig(num_rays_per_chunk=1 << 15),
     vis="viewer",
 )
-
 method_configs["depth-nerfacto"] = TrainerConfig(
     method_name="depth-nerfacto",
     steps_per_eval_batch=500,
     steps_per_save=2000,
-    max_num_iterations=50000,
+    max_num_iterations=120000,
     mixed_precision=True,
     pipeline=VanillaPipelineConfig(
         datamanager=VanillaDataManagerConfig(
             _target=VanillaDataManager[DepthDataset],
-            dataparser=NerfstudioDataParserConfig(train_split_fraction=0.995),
+            pixel_sampler=PairPixelSamplerConfig(num_rays_per_batch=5284),
+            dataparser=NerfstudioDataParserConfig(train_split_fraction=0.998, downscale_factor=2),
             train_num_rays_per_batch=5284,
             eval_num_rays_per_batch=4096,
             pose_optimizer=PoseOptimizerConfig(
                 mode="SO3xR3",
-                optimizer=RAdamOptimizerConfig(lr=1e-4, eps=1e-8, weight_decay=1e-3),
+                optimizer=AdamWOptimizerConfig(lr=1e-4, eps=1e-8, weight_decay=1e-3),
                 scheduler=ExponentialDecaySchedulerConfig(
                     delay_steps=10000,
+                    lr_pre_warmup=1e-4,
                     warmup_steps=3000,
-                    lr_final=1e-5,
+                    lr_final=1e-6,
                     max_steps=50000,
                 ),
             ),
             intrinsic_optimizer=IntrinsicOptimizerConfig(
                 mode="square_scale",
-                optimizer=RAdamOptimizerConfig(lr=1e-4, eps=1e-8, weight_decay=1e-4),
+                optimizer=AdamWOptimizerConfig(lr=1e-4, eps=1e-8, weight_decay=1e-4),
                 scheduler=ExponentialDecaySchedulerConfig(
-                    delay_steps=15000,
+                    delay_steps=35000,
                     warmup_steps=3000,
+                    lr_pre_warmup=1e-8,
                     lr_final=1e-5,
                     max_steps=50000,
                 ),
             ),
             distortion_optimizer=DistortionOptimizerConfig(
                 mode="shift",
-                optimizer=RAdamOptimizerConfig(lr=1e-4, eps=1e-8, weight_decay=1e-4),
+                optimizer=AdamWOptimizerConfig(lr=1e-4, eps=1e-8, weight_decay=1e-3),
                 scheduler=ExponentialDecaySchedulerConfig(
-                    delay_steps=25000,
+                    delay_steps=45000,
+                    lr_pre_warmup=1e-8,
                     warmup_steps=3000,
                     lr_final=1e-5,
                     max_steps=50000,
@@ -270,32 +287,33 @@ method_configs["depth-nerfacto"] = TrainerConfig(
             hidden_dim_color=512,
             appearance_embed_dim=128,
             max_res=8192,
-            proposal_weights_anneal_max_num_iters=15000,
+            proposal_weights_anneal_max_num_iters=40000,
             log2_hashmap_size=22,
             features_per_level=8,
             use_appearance_embedding=True,
             use_depth_ranking_loss=True,
+            use_depth_loss=False,
             use_gradient_scaling=False,
-            compute_hash_regularization=True,
+            compute_hash_regularization=False,
             use_bundle_adjust=False,
         ),
     ),
     optimizers={
-         "proposal_networks": {
-            "optimizer": RAdamOptimizerConfig(lr=1e-3, eps=1e-15, weight_decay=1e-6),
+        "proposal_networks": {
+            "optimizer": AdamWOptimizerConfig(lr=6e-3, eps=1e-15, weight_decay=1e-5),
             "scheduler": ExponentialDecaySchedulerConfig(
-                delay_steps=10000,
-                lr_pre_warmup=1e-3,
-                max_steps=70000,
+                delay_steps=20000,
+                lr_pre_warmup=6e-3,
+                max_steps=120000,
                 lr_final=5e-5,
             ),
         },
         "fields": {
-            "optimizer": RAdamOptimizerConfig(lr=1e-3, eps=1e-15, weight_decay=1e-6),
+            "optimizer": AdamWOptimizerConfig(lr=6e-3, eps=1e-15, weight_decay=1e-5),
             "scheduler": ExponentialDecaySchedulerConfig(
-                delay_steps=10000,
-                lr_pre_warmup=1e-3,
-                max_steps=70000,
+                delay_steps=20000,
+                lr_pre_warmup=6e-3,
+                max_steps=120000,
                 lr_final=5e-5,
             ),
         },
@@ -308,7 +326,7 @@ method_configs["depth-refnerfacto"] = TrainerConfig(
     method_name="depth-refnerfacto",
     steps_per_eval_batch=500,
     steps_per_save=2000,
-    max_num_iterations=50000,
+    max_num_iterations=60000,
     mixed_precision=True,
     pipeline=VanillaPipelineConfig(
         datamanager=VanillaDataManagerConfig(
@@ -319,29 +337,32 @@ method_configs["depth-refnerfacto"] = TrainerConfig(
             eval_num_rays_per_batch=4096,
             pose_optimizer=PoseOptimizerConfig(
                 mode="SO3xR3",
-                optimizer=RAdamOptimizerConfig(lr=6e-5, eps=1e-8, weight_decay=1e-3),
+                optimizer=AdamWOptimizerConfig(lr=1e-4, eps=1e-8, weight_decay=1e-3),
                 scheduler=ExponentialDecaySchedulerConfig(
-                    warmup_steps=10000,
                     delay_steps=10000,
+                    lr_pre_warmup=1e-4,
+                    warmup_steps=3000,
                     lr_final=1e-6,
                     max_steps=50000,
                 ),
             ),
             intrinsic_optimizer=IntrinsicOptimizerConfig(
                 mode="square_scale",
-                optimizer=RAdamOptimizerConfig(lr=6e-4, eps=1e-8, weight_decay=1e-4),
+                optimizer=AdamWOptimizerConfig(lr=1e-4, eps=1e-8, weight_decay=1e-4),
                 scheduler=ExponentialDecaySchedulerConfig(
-                    delay_steps=8000,
+                    delay_steps=35000,
                     warmup_steps=3000,
+                    lr_pre_warmup=1e-8,
                     lr_final=1e-5,
                     max_steps=50000,
                 ),
             ),
             distortion_optimizer=DistortionOptimizerConfig(
                 mode="shift",
-                optimizer=RAdamOptimizerConfig(lr=1e-4, eps=1e-8, weight_decay=1e-4),
+                optimizer=AdamWOptimizerConfig(lr=1e-4, eps=1e-8, weight_decay=1e-3),
                 scheduler=ExponentialDecaySchedulerConfig(
-                    delay_steps=25000,
+                    delay_steps=45000,
+                    lr_pre_warmup=1e-8,
                     warmup_steps=3000,
                     lr_final=1e-5,
                     max_steps=50000,
@@ -371,23 +392,21 @@ method_configs["depth-refnerfacto"] = TrainerConfig(
     ),
     optimizers={
         "proposal_networks": {
-            "optimizer": RAdamOptimizerConfig(lr=1e-2, eps=1e-15, weight_decay=1e-6),
+            "optimizer": AdamWOptimizerConfig(lr=6e-3, eps=1e-15, weight_decay=1e-5),
             "scheduler": ExponentialDecaySchedulerConfig(
-                delay_steps=1000,
-                warmup_steps=5000,
-                lr_pre_warmup=1e-3,
-                max_steps=90000,
-                lr_final=3e-5,
+                delay_steps=20000,
+                lr_pre_warmup=6e-3,
+                max_steps=120000,
+                lr_final=5e-5,
             ),
         },
         "fields": {
-            "optimizer": RAdamOptimizerConfig(lr=1e-2, eps=1e-15, weight_decay=1e-6),
+            "optimizer": AdamWOptimizerConfig(lr=6e-3, eps=1e-15, weight_decay=1e-5),
             "scheduler": ExponentialDecaySchedulerConfig(
-                delay_steps=1000,
-                warmup_steps=5000,
-                lr_pre_warmup=1e-3,
-                max_steps=90000,
-                lr_final=3e-5,
+                delay_steps=20000,
+                lr_pre_warmup=6e-3,
+                max_steps=120000,
+                lr_final=5e-5,
             ),
         },
     },
@@ -408,19 +427,34 @@ method_configs["zipnerfacto"] = TrainerConfig(
             eval_num_rays_per_batch=4096,
             pose_optimizer=PoseOptimizerConfig(
                 mode="SO3xR3",
-                optimizer=RAdamOptimizerConfig(lr=6e-4, eps=1e-8, weight_decay=1e-4),
+                optimizer=AdamWOptimizerConfig(lr=1e-4, eps=1e-8, weight_decay=1e-3),
                 scheduler=ExponentialDecaySchedulerConfig(
+                    delay_steps=10000,
+                    lr_pre_warmup=1e-4,
                     warmup_steps=3000,
-                    lr_final=6e-5,
+                    lr_final=1e-6,
                     max_steps=50000,
                 ),
             ),
             intrinsic_optimizer=IntrinsicOptimizerConfig(
                 mode="square_scale",
-                optimizer=RAdamOptimizerConfig(lr=6e-4, eps=1e-8, weight_decay=1e-4),
+                optimizer=AdamWOptimizerConfig(lr=1e-4, eps=1e-8, weight_decay=1e-4),
                 scheduler=ExponentialDecaySchedulerConfig(
+                    delay_steps=35000,
                     warmup_steps=3000,
-                    lr_final=6e-5,
+                    lr_pre_warmup=1e-8,
+                    lr_final=1e-5,
+                    max_steps=50000,
+                ),
+            ),
+            distortion_optimizer=DistortionOptimizerConfig(
+                mode="shift",
+                optimizer=AdamWOptimizerConfig(lr=1e-4, eps=1e-8, weight_decay=1e-3),
+                scheduler=ExponentialDecaySchedulerConfig(
+                    delay_steps=45000,
+                    lr_pre_warmup=1e-8,
+                    warmup_steps=3000,
+                    lr_final=1e-5,
                     max_steps=50000,
                 ),
             ),
@@ -436,17 +470,21 @@ method_configs["zipnerfacto"] = TrainerConfig(
     ),
     optimizers={
         "proposal_networks": {
-            "optimizer": RAdamOptimizerConfig(lr=1e-2, eps=1e-15, weight_decay=1e-6),
+            "optimizer": AdamWOptimizerConfig(lr=6e-3, eps=1e-15, weight_decay=1e-5),
             "scheduler": ExponentialDecaySchedulerConfig(
+                delay_steps=20000,
+                lr_pre_warmup=6e-3,
+                max_steps=120000,
                 lr_final=5e-5,
-                max_steps=100000,
             ),
         },
         "fields": {
-            "optimizer": RAdamOptimizerConfig(lr=1e-2, eps=1e-15, weight_decay=1e-6),
+            "optimizer": AdamWOptimizerConfig(lr=6e-3, eps=1e-15, weight_decay=1e-5),
             "scheduler": ExponentialDecaySchedulerConfig(
+                delay_steps=20000,
+                lr_pre_warmup=6e-3,
+                max_steps=120000,
                 lr_final=5e-5,
-                max_steps=100000,
             ),
         },
     },
@@ -467,24 +505,32 @@ method_configs["refnerfacto"] = TrainerConfig(
             eval_num_rays_per_batch=4096,
             pose_optimizer=PoseOptimizerConfig(
                 mode="SO3xR3",
-                optimizer=RAdamOptimizerConfig(lr=6e-4, eps=1e-8, weight_decay=1e-4),
-                scheduler=ExponentialDecaySchedulerConfig(lr_final=1e-5, max_steps=50000),
+                optimizer=AdamWOptimizerConfig(lr=1e-4, eps=1e-8, weight_decay=1e-3),
+                scheduler=ExponentialDecaySchedulerConfig(
+                    delay_steps=10000,
+                    lr_pre_warmup=1e-4,
+                    warmup_steps=3000,
+                    lr_final=1e-6,
+                    max_steps=50000,
+                ),
             ),
             intrinsic_optimizer=IntrinsicOptimizerConfig(
                 mode="square_scale",
-                optimizer=RAdamOptimizerConfig(lr=1e-4, eps=1e-8, weight_decay=1e-4),
+                optimizer=AdamWOptimizerConfig(lr=1e-4, eps=1e-8, weight_decay=1e-4),
                 scheduler=ExponentialDecaySchedulerConfig(
-                    delay_steps=15000,
+                    delay_steps=35000,
                     warmup_steps=3000,
+                    lr_pre_warmup=1e-8,
                     lr_final=1e-5,
                     max_steps=50000,
                 ),
             ),
             distortion_optimizer=DistortionOptimizerConfig(
                 mode="shift",
-                optimizer=RAdamOptimizerConfig(lr=1e-4, eps=1e-8, weight_decay=1e-4),
+                optimizer=AdamWOptimizerConfig(lr=1e-4, eps=1e-8, weight_decay=1e-3),
                 scheduler=ExponentialDecaySchedulerConfig(
-                    delay_steps=25000,
+                    delay_steps=45000,
+                    lr_pre_warmup=1e-8,
                     warmup_steps=3000,
                     lr_final=1e-5,
                     max_steps=50000,
@@ -500,17 +546,19 @@ method_configs["refnerfacto"] = TrainerConfig(
     ),
     optimizers={
         "proposal_networks": {
-            "optimizer": RAdamOptimizerConfig(lr=5e-3, eps=1e-15, weight_decay=1e-7),
+            "optimizer": AdamWOptimizerConfig(lr=6e-3, eps=1e-15, weight_decay=1e-5),
             "scheduler": ExponentialDecaySchedulerConfig(
-                warmup_steps=3000,
+                delay_steps=20000,
+                lr_pre_warmup=6e-3,
                 max_steps=120000,
                 lr_final=5e-5,
             ),
         },
         "fields": {
-            "optimizer": RAdamOptimizerConfig(lr=5e-3, eps=1e-15, weight_decay=1e-7),
+            "optimizer": AdamWOptimizerConfig(lr=6e-3, eps=1e-15, weight_decay=1e-5),
             "scheduler": ExponentialDecaySchedulerConfig(
-                warmup_steps=3000,
+                delay_steps=20000,
+                lr_pre_warmup=6e-3,
                 max_steps=120000,
                 lr_final=5e-5,
             ),
@@ -533,28 +581,32 @@ method_configs["ziprefnerfacto"] = TrainerConfig(
             eval_num_rays_per_batch=4096,
             pose_optimizer=PoseOptimizerConfig(
                 mode="SO3xR3",
-                optimizer=RAdamOptimizerConfig(lr=1e-4, eps=1e-8, weight_decay=1e-4),
+                optimizer=AdamWOptimizerConfig(lr=1e-4, eps=1e-8, weight_decay=1e-3),
                 scheduler=ExponentialDecaySchedulerConfig(
+                    delay_steps=10000,
+                    lr_pre_warmup=1e-4,
                     warmup_steps=3000,
-                    lr_final=1e-5,
+                    lr_final=1e-6,
                     max_steps=50000,
                 ),
             ),
             intrinsic_optimizer=IntrinsicOptimizerConfig(
                 mode="square_scale",
-                optimizer=RAdamOptimizerConfig(lr=1e-4, eps=1e-8, weight_decay=1e-4),
+                optimizer=AdamWOptimizerConfig(lr=1e-4, eps=1e-8, weight_decay=1e-4),
                 scheduler=ExponentialDecaySchedulerConfig(
+                    delay_steps=35000,
                     warmup_steps=3000,
-                    delay_steps=15000,
+                    lr_pre_warmup=1e-8,
                     lr_final=1e-5,
                     max_steps=50000,
                 ),
             ),
             distortion_optimizer=DistortionOptimizerConfig(
                 mode="shift",
-                optimizer=RAdamOptimizerConfig(lr=1e-4, eps=1e-8, weight_decay=1e-4),
+                optimizer=AdamWOptimizerConfig(lr=1e-4, eps=1e-8, weight_decay=1e-3),
                 scheduler=ExponentialDecaySchedulerConfig(
-                    delay_steps=25000,
+                    delay_steps=45000,
+                    lr_pre_warmup=1e-8,
                     warmup_steps=3000,
                     lr_final=1e-5,
                     max_steps=50000,
@@ -573,25 +625,23 @@ method_configs["ziprefnerfacto"] = TrainerConfig(
             proposal_warmup=50000,
         ),
     ),
-   optimizers={
+    optimizers={
         "proposal_networks": {
-            "optimizer": RAdamOptimizerConfig(lr=1e-2, eps=1e-15, weight_decay=1e-6),
+            "optimizer": AdamWOptimizerConfig(lr=6e-3, eps=1e-15, weight_decay=1e-5),
             "scheduler": ExponentialDecaySchedulerConfig(
-                delay_steps=1000,
-                warmup_steps=5000,
-                lr_pre_warmup=1e-3,
-                max_steps=90000,
-                lr_final=3e-5,
+                delay_steps=20000,
+                lr_pre_warmup=6e-3,
+                max_steps=120000,
+                lr_final=5e-5,
             ),
         },
         "fields": {
-            "optimizer": RAdamOptimizerConfig(lr=1e-2, eps=1e-15, weight_decay=1e-6),
+            "optimizer": AdamWOptimizerConfig(lr=6e-3, eps=1e-15, weight_decay=1e-5),
             "scheduler": ExponentialDecaySchedulerConfig(
-                delay_steps=1000,
-                warmup_steps=5000,
-                lr_pre_warmup=1e-3,
-                max_steps=90000,
-                lr_final=3e-5,
+                delay_steps=20000,
+                lr_pre_warmup=6e-3,
+                max_steps=120000,
+                lr_final=5e-5,
             ),
         },
     },
@@ -607,43 +657,43 @@ method_configs["depth-ziprefnerfacto"] = TrainerConfig(
     steps_per_save=2000,
     max_num_iterations=90000,
     mixed_precision=True,
-    gradient_accumulation_steps=3,
-    use_grad_scaler=True,
     pipeline=VanillaPipelineConfig(
         datamanager=VanillaDataManagerConfig(
             _target=VanillaDataManager[DepthDataset],
-            # pixel_sampler=PairPixelSamplerConfig(num_rays_per_batch=3296),
-            dataparser=NerfstudioDataParserConfig(train_split_fraction=0.994),
-            train_num_rays_per_batch=2296,
+            pixel_sampler=PairPixelSamplerConfig(num_rays_per_batch=3596),
+            dataparser=NerfstudioDataParserConfig(train_split_fraction=0.998, downscale_factor=2),
+            train_num_rays_per_batch=3596,
             eval_num_rays_per_batch=4096,
             pose_optimizer=PoseOptimizerConfig(
                 mode="SO3xR3",
-                optimizer=RAdamOptimizerConfig(lr=1e-4, eps=1e-8, weight_decay=1e-4),
+                optimizer=AdamWOptimizerConfig(lr=1e-4, eps=1e-8, weight_decay=1e-3),
                 scheduler=ExponentialDecaySchedulerConfig(
-                    warmup_steps=5000,
-                    delay_steps=15000,
-                    lr_pre_warmup=5e-5,
+                    delay_steps=10000,
+                    lr_pre_warmup=1e-4,
+                    warmup_steps=3000,
                     lr_final=1e-6,
-                    max_steps=70000,
+                    max_steps=50000,
                 ),
             ),
             intrinsic_optimizer=IntrinsicOptimizerConfig(
                 mode="square_scale",
-                optimizer=RAdamOptimizerConfig(lr=1e-4, eps=1e-8, weight_decay=1e-4),
+                optimizer=AdamWOptimizerConfig(lr=1e-4, eps=1e-8, weight_decay=1e-4),
                 scheduler=ExponentialDecaySchedulerConfig(
-                    warmup_steps=5000,
                     delay_steps=35000,
-                    lr_final=1e-6,
+                    warmup_steps=3000,
+                    lr_pre_warmup=1e-8,
+                    lr_final=1e-5,
                     max_steps=50000,
                 ),
             ),
             distortion_optimizer=DistortionOptimizerConfig(
                 mode="shift",
-                optimizer=RAdamOptimizerConfig(lr=1e-4, eps=1e-8, weight_decay=1e-4),
+                optimizer=AdamWOptimizerConfig(lr=1e-4, eps=1e-8, weight_decay=1e-3),
                 scheduler=ExponentialDecaySchedulerConfig(
-                    warmup_steps=5000,
                     delay_steps=45000,
-                    lr_final=1e-6,
+                    lr_pre_warmup=1e-8,
+                    warmup_steps=3000,
+                    lr_final=1e-5,
                     max_steps=50000,
                 ),
             ),
@@ -662,7 +712,8 @@ method_configs["depth-ziprefnerfacto"] = TrainerConfig(
             compute_density_regularization=True,
             num_proposal_samples_per_ray=(256, 256),
             visualize_weights_distribution=True,
-            use_depth_ranking_loss=False,
+            use_depth_ranking_loss=True,
+            use_depth_loss=False,
             proposal_net_args_list=[
                 {"hidden_dim": 64, "log2_hashmap_size": 17, "num_levels": 5, "max_res": 512, "use_linear": False, "features_per_level": 4},
                 {"hidden_dim": 64, "log2_hashmap_size": 17, "num_levels": 7, "max_res": 4096, "use_linear": False, "features_per_level": 4},
@@ -672,21 +723,21 @@ method_configs["depth-ziprefnerfacto"] = TrainerConfig(
     ),
     optimizers={
         "proposal_networks": {
-            "optimizer": RAdamOptimizerConfig(lr=6e-3, eps=1e-15, weight_decay=1e-6),
+            "optimizer": AdamWOptimizerConfig(lr=6e-3, eps=1e-15, weight_decay=1e-5),
             "scheduler": ExponentialDecaySchedulerConfig(
-                delay_steps=30000,
+                delay_steps=20000,
                 lr_pre_warmup=6e-3,
                 max_steps=120000,
-                lr_final=1e-5,
+                lr_final=5e-5,
             ),
         },
         "fields": {
-            "optimizer": RAdamOptimizerConfig(lr=1e-3, eps=1e-15, weight_decay=1e-6),
+            "optimizer": AdamWOptimizerConfig(lr=6e-3, eps=1e-15, weight_decay=1e-5),
             "scheduler": ExponentialDecaySchedulerConfig(
-                delay_steps=30000,
-                lr_pre_warmup=1e-3,
+                delay_steps=20000,
+                lr_pre_warmup=6e-3,
                 max_steps=120000,
-                lr_final=1e-5,
+                lr_final=5e-5,
             ),
         },
     },

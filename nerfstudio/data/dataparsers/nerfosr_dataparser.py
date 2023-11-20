@@ -27,6 +27,7 @@ from typing import List, Literal, Tuple, Type
 
 import numpy as np
 import torch
+from torch import Tensor
 
 from nerfstudio.cameras import camera_utils
 from nerfstudio.cameras.cameras import Cameras, CameraType
@@ -76,7 +77,7 @@ def _parse_osm_txt(filename: str):
 
 def get_camera_params(
     scene_dir: str, split: Literal["train", "validation", "test"]
-) -> Tuple[torch.Tensor, torch.Tensor, int]:
+) -> Tuple[Tensor, Tensor, int]:
     """Load camera intrinsic and extrinsic parameters for a given scene split.
 
     Args"

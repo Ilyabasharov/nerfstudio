@@ -108,6 +108,7 @@ class NerfactoField(Field):
         compute_hash_regularization: bool = False,
         compute_appearence_regularization: bool = False,
         regularize_function: Callable[[Tensor], Tensor] = torch.square,
+        density_activation: Callable[[Tensor], Tensor] = lambda x: trunc_exp(x - 1),
         implementation: Literal["tcnn", "torch"] = "tcnn",
     ) -> None:
         super().__init__()
@@ -136,6 +137,7 @@ class NerfactoField(Field):
         self.compute_appearence_regularization = compute_appearence_regularization
         self.regularize_function = regularize_function
         self.hidden_dim = hidden_dim
+        self.density_activation = density_activation
 
         self.direction_encoding = SHEncoding(
             levels=4,
@@ -245,12 +247,12 @@ class NerfactoField(Field):
 
     def get_density(self, ray_samples: RaySamples) -> Tuple[Tensor, Tensor]:
         """Computes and returns the densities."""
+        positions = ray_samples.frustums.get_positions()
         if self.spatial_distortion is not None:
-            positions = ray_samples.frustums.get_positions()
             positions = self.spatial_distortion(positions)
             positions = (positions + 2.0) / 4.0
         else:
-            positions = SceneBox.get_normalized_positions(ray_samples.frustums.get_positions(), self.aabb)
+            positions = SceneBox.get_normalized_positions(positions, self.aabb)
         # Make sure the tcnn gets inputs between 0 and 1.
         selector = ((positions > 0.0) & (positions < 1.0)).all(dim=-1)
         positions = positions * selector[..., None]
@@ -265,7 +267,7 @@ class NerfactoField(Field):
         # Rectifying the density with an exponential is much more stable than a ReLU or
         # softplus, because it enables high post-activation (float32) density outputs
         # from smaller internal (float16) parameters.
-        density = trunc_exp(density_before_activation.to(positions))
+        density = self.density_activation(density_before_activation.to(positions))
         density = density * selector[..., None]
 
         return density, base_mlp_out

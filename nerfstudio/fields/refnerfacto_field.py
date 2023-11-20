@@ -238,7 +238,10 @@ class RefNerfactoField(NerfactoField):
             mlp_head_in_dim += 1
 
         if use_ide_enc:
-            self.ide_encoding = IDEncoding(levels=levels)
+            self.ide_encoding = IDEncoding(
+                levels=levels,
+                implementation=implementation,
+            )
             mlp_head_in_dim += self.ide_encoding.get_out_dim()
         else:
             mlp_head_in_dim += self.direction_encoding.get_out_dim()

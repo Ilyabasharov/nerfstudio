@@ -19,7 +19,7 @@ from typing import Optional, Callable
 
 import torch
 from jaxtyping import Shaped, Int
-from torch import Tensor
+from torch import Tensor, nn
 
 from nerfstudio.field_components.base_field_component import FieldComponent
 
@@ -40,7 +40,7 @@ class Embedding(FieldComponent):
         self.build_nn_modules()
 
     def build_nn_modules(self) -> None:
-        self.embedding = torch.nn.Embedding(self.in_dim, self.out_dim)
+        self.embedding = nn.Embedding(self.in_dim, self.out_dim)
 
     def mean(self, dim=0):
         """Return the mean of the embedding weights along a dim."""
@@ -59,7 +59,7 @@ class Embedding(FieldComponent):
         regularize_fn: Callable[[Tensor], Tensor] = torch.abs,
         camera_indices: Optional[Int[Tensor, "num_trainable_cameras"]] = None,
     ) -> Shaped[Tensor, "*batch output_dim"]:
-        """Additional regularisation
+        """Additional regularisation for training stabilisation
 
         Args:
             regularize_fn: function to regularize weights
@@ -67,9 +67,7 @@ class Embedding(FieldComponent):
 
         weights = self.embedding.weight
 
-        # Apply regularize to unique indexes without repetition
         if camera_indices is not None:
-            unique_camera_indices = torch.unique(camera_indices, sorted=False)
-            weights = weights[unique_camera_indices]
+            weights = weights[camera_indices]
 
         return regularize_fn(weights)

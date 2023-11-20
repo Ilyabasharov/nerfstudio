@@ -23,6 +23,7 @@ from typing import Dict, List, Literal, Optional, Tuple, Type
 
 import nerfacc
 import torch
+from torch import Tensor
 from torch.nn import Parameter
 from torchmetrics.functional import structural_similarity_index_measure
 from torchmetrics.image import PeakSignalNoiseRatio
@@ -237,8 +238,8 @@ class NGPModel(Model):
         return loss_dict
 
     def get_image_metrics_and_images(
-        self, outputs: Dict[str, torch.Tensor], batch: Dict[str, torch.Tensor]
-    ) -> Tuple[Dict[str, float], Dict[str, torch.Tensor]]:
+        self, outputs: Dict[str, Tensor], batch: Dict[str, Tensor]
+    ) -> Tuple[Dict[str, float], Dict[str, Tensor]]:
         image = batch["image"].to(self.device)
         image = self.renderer_rgb.blend_background(image)
         rgb = outputs["rgb"]

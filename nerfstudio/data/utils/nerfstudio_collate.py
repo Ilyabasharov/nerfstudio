@@ -22,6 +22,7 @@ import re
 from typing import Any, Callable, Dict, Union
 
 import torch
+from torch import Tensor
 import torch.utils.data
 
 from nerfstudio.cameras.cameras import Cameras
@@ -92,7 +93,7 @@ def nerfstudio_collate(batch: Any, extra_mappings: Union[Dict[type, Callable], N
         extra_mappings = {}
     elem = batch[0]
     elem_type = type(elem)
-    if isinstance(elem, torch.Tensor):
+    if isinstance(elem, Tensor):
         out = None
         if torch.utils.data.get_worker_info() is not None:
             # If we're in a background process, concatenate directly into a

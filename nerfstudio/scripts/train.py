@@ -45,6 +45,7 @@ subcommand:
 
 from __future__ import annotations
 
+import os
 import random
 import socket
 import traceback
@@ -81,9 +82,13 @@ def _find_free_port() -> str:
 
 def _set_random_seed(seed) -> None:
     """Set randomness seed in torch and numpy"""
+    os.environ['PYTHONHASHSEED'] = str(seed)
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
+    assert torch.cuda.is_available(), "cuda is not available. Please check your installation."
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
 
 
 def train_loop(local_rank: int, world_size: int, config: TrainerConfig, global_rank: int = 0):

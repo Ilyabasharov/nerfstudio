@@ -171,7 +171,7 @@ class DepthNerfactoModel(NerfactoModel):
     def get_loss_dict(self, outputs, batch, metrics_dict=None):
         loss_dict = super().get_loss_dict(outputs, batch, metrics_dict)
         if self.training:
-            assert metrics_dict is not None and ("depth_loss" in metrics_dict or "depth_ranking_loss" in metrics_dict)
+            assert metrics_dict is not None
             if "depth_ranking_loss" in metrics_dict:
                 loss_dict["depth_ranking_loss"] = self.ranking_loss_multiplier * metrics_dict["depth_ranking_loss"]
             if "depth_loss" in metrics_dict:
@@ -179,10 +179,11 @@ class DepthNerfactoModel(NerfactoModel):
 
         return loss_dict
 
+    @torch.no_grad()
     def _visualise_weights(
         self,
         outputs: Dict[str, Union[Tensor, List[Tensor]]],
-        batch: Dict[str, torch.Tensor],
+        batch: Dict[str, Tensor],
     ) -> Dict[str, List[Figure]]:
         figures_dict = {}
         if self.vis_weights_dist:
@@ -209,10 +210,10 @@ class DepthNerfactoModel(NerfactoModel):
     def get_image_metrics_and_images(
         self,
         outputs: Dict[str, Union[Tensor, List[Tensor]]],
-        batch: Dict[str, torch.Tensor],
+        batch: Dict[str, Tensor],
     ) -> Tuple[
         Dict[str, float],
-        Dict[str, torch.Tensor],
+        Dict[str, Tensor],
         Dict[str, List[Figure]],
     ]:
         """Appends ground truth depth to the depth image."""
@@ -264,6 +265,6 @@ class DepthNerfactoModel(NerfactoModel):
 
     def _set_ranking_loss_multiplier(self, step: int) -> None:
         """Sets up ranking loss multiplier."""
-        self.ranking_loss_multiplier = self.config.depth_ranking_loss_mult * np.interp(
+        self.ranking_loss_multiplier: float = self.config.depth_ranking_loss_mult * np.interp(
             step, [0, 5000], [0, 0.2]
-        )
+        ).item()

@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
-from typing import Literal, Optional, Tuple, Union
+from typing import Literal, Optional, Tuple
 
 import mediapy as media
 import numpy as np
@@ -34,12 +34,14 @@ from nerfstudio.cameras.rays import RayBundle
 from nerfstudio.exporter.exporter_utils import Mesh
 from nerfstudio.pipelines.base_pipeline import Pipeline
 from nerfstudio.utils.rich_utils import CONSOLE, get_progress
+from nerfstudio.utils.misc import TORCH_DEVICE
 
-TORCH_DEVICE = Union[torch.device, str]
 
 
 def get_parallelogram_area(
-    p: Float[Tensor, "*bs 2"], v0: Float[Tensor, "*bs 2"], v1: Float[Tensor, "*bs 2"]
+    p: Float[Tensor, "*bs 2"],
+    v0: Float[Tensor, "*bs 2"],
+    v1: Float[Tensor, "*bs 2"],
 ) -> Float[Tensor, "*bs"]:
     """Given three 2D points, return the area defined by the parallelogram. I.e., 2x the triangle area.
 
@@ -55,8 +57,13 @@ def get_parallelogram_area(
 
 
 def get_texture_image(
-    num_pixels_w: int, num_pixels_h: int, device: TORCH_DEVICE
-) -> Tuple[Float[Tensor, "num_pixels_h num_pixels_w 2"], Float[Tensor, "num_pixels_h num_pixels_w 2"]]:
+    num_pixels_w: int,
+    num_pixels_h: int,
+    device: TORCH_DEVICE = "cpu",
+) -> Tuple[
+    Float[Tensor, "num_pixels_h num_pixels_w 2"],
+    Float[Tensor, "num_pixels_h num_pixels_w 2"],
+]:
     """Get a texture image."""
     px_w = 1.0 / num_pixels_w
     px_h = 1.0 / num_pixels_h
@@ -213,8 +220,8 @@ def unwrap_mesh_with_xatlas(
     vertices: Float[Tensor, "num_verts 3"],
     faces: Float[Tensor, "num_faces 3 torch.long"],
     vertex_normals: Float[Tensor, "num_verts 3"],
-    num_pixels_per_side=1024,
-    num_faces_per_barycentric_chunk=10,
+    num_pixels_per_side: int = 1024,
+    num_faces_per_barycentric_chunk: int = 10,
 ) -> Tuple[
     Float[Tensor, "num_faces 3 2"],
     Float[Tensor, "num_pixels num_pixels 3"],
@@ -327,7 +334,7 @@ def export_textured_mesh(
     px_per_uv_triangle: Optional[int],
     unwrap_method: Literal["xatlas", "custom"] = "xatlas",
     raylen_method: Literal["edge", "none"] = "edge",
-    num_pixels_per_side=1024,
+    num_pixels_per_side: int = 1024,
 ) -> None:
     """Textures a mesh using the radiance field from the Pipeline.
     The mesh is written to an OBJ file in the output directory,

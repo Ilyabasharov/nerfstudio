@@ -30,9 +30,8 @@ from nerfstudio.utils.math import (
     multisampled_frustum_to_gaussian,
 )
 from nerfstudio.utils.tensor_dataclass import TensorDataclass
-from nerfstudio.utils.misc import torch_compile
+from nerfstudio.utils.misc import torch_compile, TORCH_DEVICE
 
-TORCH_DEVICE = Union[str, torch.device]
 
 
 @dataclass
@@ -167,7 +166,7 @@ class RaySamples(TensorDataclass):
     times: Optional[Float[Tensor, "*batch 1"]] = None
     """Times at which rays are sampled"""
 
-    @torch_compile(dynamic=True)
+    # @torch_compile(dynamic=True, mode="reduce-overhead")
     def get_weights(
         self,
         densities: Float[Tensor, "*batch num_samples 1"],
@@ -191,7 +190,7 @@ class RaySamples(TensorDataclass):
 
         return weights
     
-    @torch_compile(dynamic=True)
+    @torch_compile(dynamic=True, mode="reduce-overhead")
     def get_transmittance(
         self,
         densities: Float[Tensor, "*batch num_samples 1"],
@@ -208,17 +207,15 @@ class RaySamples(TensorDataclass):
         """
 
         delta_density = self.deltas * densities
-        alphas = 1 - torch.exp(-delta_density)
+        alphas = 1 - torch.exp(-delta_density)  # in [0, 1)
 
-        transmittance = torch.cumsum(delta_density[..., :-1, :], dim=-2)
         transmittance = torch.cat(
             [
-                torch.zeros((*transmittance.shape[:1], 1, 1), device=densities.device),
-                transmittance,
+                densities.new_zeros((*densities.shape[:-2], 1, 1)),
+                delta_density[..., :-1, :].cumsum_(dim=-2),
             ],
             dim=-2,
-        )
-        transmittance = torch.exp(-transmittance)  # [..., "num_samples"]
+        ).mul_(-1).exp_()  # [..., "num_samples"]
 
         if transmittance_only:
             return transmittance
@@ -240,11 +237,16 @@ class RaySamples(TensorDataclass):
         ...
 
     @staticmethod
+    @torch_compile(dynamic=True, mode="reduce-overhead")
     def get_weights_and_transmittance_from_alphas(
-        alphas: Float[Tensor, "*batch num_samples 1"], weights_only: bool = False
+        alphas: Float[Tensor, "*batch num_samples 1"],
+        weights_only: bool = False,
     ) -> Union[
         Float[Tensor, "*batch num_samples 1"],
-        Tuple[Float[Tensor, "*batch num_samples 1"], Float[Tensor, "*batch num_samples 1"]],
+        Tuple[
+            Float[Tensor, "*batch num_samples 1"],
+            Float[Tensor, "*batch num_samples 1"],
+        ],
     ]:
         """Return weights based on predicted alphas
         Args:
@@ -254,10 +256,14 @@ class RaySamples(TensorDataclass):
             Tuple of weights and transmittance for each sample
         """
 
-        transmittance = torch.cumprod(
-            torch.cat([torch.ones((*alphas.shape[:1], 1, 1), device=alphas.device), 1.0 - alphas + 1e-7], 1), 1
-        )
-
+        transmittance = torch.cat(
+            [
+                alphas.new_ones((*alphas.shape[:1], 1, 1)),
+                (1.0 - alphas).clamp_min_(1e-7),  # prevent cumprod zero output
+            ],
+            dim=1,
+        ).cumprod_(dim=1)
+    
         weights = alphas * transmittance[:, :-1, :]
         if weights_only:
             return weights
@@ -313,7 +319,11 @@ class RayBundle(TensorDataclass):
         Args:
             camera_index: Camera index.
         """
-        self.camera_indices = torch.ones_like(self.origins[..., 0:1]).long() * camera_index
+        self.camera_indices = torch.ones(
+            (*self.origins.shape[:-1], 1),
+            dtype=torch.long,
+            device=self.origins.device,
+        ) * camera_index
 
     def __len__(self) -> int:
         num_rays = torch.numel(self.origins) // self.origins.shape[-1]

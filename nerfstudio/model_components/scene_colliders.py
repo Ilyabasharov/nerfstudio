@@ -89,7 +89,7 @@ class AABBBoxCollider(SceneCollider):
 
         # clamp to near plane
         near_plane = self.near_plane if self.training else 0
-        nears = torch.clamp(nears, min=near_plane)
+        nears = nears.clamp_min_(min=near_plane)
         fars = torch.maximum(fars, nears + 1e-6)
 
         return nears, fars
@@ -109,7 +109,12 @@ class AABBBoxCollider(SceneCollider):
 
 
 def _intersect_with_sphere(
-    rays_o: torch.Tensor, rays_d: torch.Tensor, center: torch.Tensor, radius: float = 1.0, near_plane: float = 0.0
+    rays_o: Tensor,
+    rays_d: Tensor,
+    center: Tensor,
+    radius: float = 1.0,
+    near_plane: float = 0.0,
+    eps: float = 1e-6,
 ):
     a = (rays_d * rays_d).sum(dim=-1, keepdim=True)
     b = 2 * (rays_o - center) * rays_d
@@ -121,8 +126,8 @@ def _intersect_with_sphere(
     nears = (-b - torch.sqrt(torch.square(b) - 4 * a * c)) / (2 * a)
     fars = (-b + torch.sqrt(torch.square(b) - 4 * a * c)) / (2 * a)
 
-    nears = torch.clamp(nears, min=near_plane)
-    fars = torch.maximum(fars, nears + 1e-6)
+    nears = nears.clamp_min_(min=near_plane)
+    fars = torch.maximum(fars, nears + eps)
 
     nears = torch.nan_to_num(nears, nan=0.0)
     fars = torch.nan_to_num(fars, nan=0.0)
@@ -139,7 +144,7 @@ class SphereCollider(SceneCollider):
         near_plane: near plane to clamp to
     """
 
-    def __init__(self, center: torch.Tensor, radius: float, near_plane: float = 0.0, **kwargs) -> None:
+    def __init__(self, center: Tensor, radius: float, near_plane: float = 0.0, **kwargs) -> None:
         super().__init__(**kwargs)
         self.center = center
         self.radius = radius

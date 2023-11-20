@@ -546,7 +546,7 @@ class NerfactoModel(Model):
     def _visualise_weights(
         self,
         outputs: Dict[str, Union[Tensor, List[Tensor]]],
-        batch: Dict[str, torch.Tensor],
+        batch: Dict[str, Tensor],
     ) -> Dict[str, List[Figure]]:
         figures_dict = {}
         if self.vis_weights_dist:
@@ -563,10 +563,10 @@ class NerfactoModel(Model):
     def get_image_metrics_and_images(
         self,
         outputs: Dict[str, Union[Tensor, List[Tensor]]],
-        batch: Dict[str, torch.Tensor],
+        batch: Dict[str, Tensor],
     ) -> Tuple[
         Dict[str, float],
-        Dict[str, torch.Tensor],
+        Dict[str, Tensor],
         Dict[str, List[Figure]],
     ]:
         gt_rgb = batch["image"].to(self.device)
