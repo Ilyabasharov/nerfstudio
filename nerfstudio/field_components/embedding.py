@@ -39,8 +39,10 @@ class Embedding(FieldComponent):
         self.out_dim = out_dim
         self.build_nn_modules()
 
-    def build_nn_modules(self) -> None:
+    def build_nn_modules(self, eps: float = 1e-2) -> None:
+        """Build module and init weights"""
         self.embedding = nn.Embedding(self.in_dim, self.out_dim)
+        nn.init.uniform_(self.embedding.weight, -eps, eps)
 
     def mean(self, dim=0):
         """Return the mean of the embedding weights along a dim."""

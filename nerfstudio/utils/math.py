@@ -240,6 +240,7 @@ def compute_3d_gaussian(
     means: Float[Tensor, "*batch 3"],
     dir_variance: Float[Tensor, "*batch 1"],
     radius_variance: Float[Tensor, "*batch 1"],
+    eps: float = 1e-8,
 ) -> Gaussians:
     """Compute gaussian along ray.
 
@@ -254,8 +255,8 @@ def compute_3d_gaussian(
     """
 
     dir_outer_product = directions[..., :, None] * directions[..., None, :]
-    eye = torch.eye(directions.shape[-1], device=directions.device)
-    dir_mag_sq = torch.clamp(torch.sum(directions**2, dim=-1, keepdim=True), min=1e-10)
+    eye = torch.eye(directions.shape[-1], dtype=directions.dtype, device=directions.device)
+    dir_mag_sq = directions.pow(2).sum(dim=-1, keepdim=True).clamp_min(eps)
     null_outer_product = eye - directions[..., :, None] * (directions / dir_mag_sq)[..., None, :]
     dir_cov_diag = dir_variance[..., None] * dir_outer_product[..., :, :]
     radius_cov_diag = radius_variance[..., None] * null_outer_product[..., :, :]
@@ -713,13 +714,14 @@ def srgb_to_linear_rgb(
 
 
 def blur_stepfun(x: Tensor, y: Tensor, r: float) -> Tuple[Tensor, Tensor]:
+    y_shape = (*y.shape[:-1], 1)
     xr, xr_idx = torch.sort(torch.cat([x - r, x + r], dim=-1))
     y1 = (
-        torch.cat([y, torch.zeros_like(y[..., :1])], dim=-1) - torch.cat([torch.zeros_like(y[..., :1]), y], dim=-1)
+        torch.cat([y, y.new_zeros(y_shape)], dim=-1) - torch.cat([y.new_zeros(y_shape), y], dim=-1)
     ) / (2 * r)
     y2 = torch.cat([y1, -y1], dim=-1).take_along_dim(xr_idx[..., :-1], dim=-1)
-    yr = torch.cumsum((xr[..., 1:] - xr[..., :-1]) * torch.cumsum(y2, dim=-1), dim=-1).clamp_min(0)
-    yr = torch.cat([torch.zeros_like(yr[..., :1]), yr], dim=-1)
+    yr = torch.cumsum((xr[..., 1:] - xr[..., :-1]) * torch.cumsum(y2, dim=-1), dim=-1).clamp_min_(0)
+    yr = torch.cat([y.new_zeros(y_shape), yr], dim=-1)
     return xr, yr
 
 
@@ -731,19 +733,17 @@ def sorted_interp_quad(x: Tensor, xp: Tensor, fpdf: Tensor, fcdf: Tensor) -> Ten
     # The final `True` index in `mask` is the start of the matching interval.
     mask = x[..., None, :] >= xp[..., :, None]
 
-    def find_interval(x: Tensor, return_idx=False):
+    def find_interval(x: Tensor) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
         # Grab the value where `mask` switches from True to False, and vice versa.
         # This approach takes advantage of the fact that `x` is sorted.
-        x0, x0_idx = torch.max(torch.where(mask, x[..., None], x[..., :1, None]), -2)
-        x1, x1_idx = torch.min(torch.where(~mask, x[..., None], x[..., -1:, None]), -2)
-        if return_idx:
-            return x0, x1, x0_idx, x1_idx
-        return x0, x1
+        x0, x0_idx = torch.where(mask, x[..., None], x[..., :1, None]).max(dim=-2)
+        x1, x1_idx = torch.where(~mask, x[..., None], x[..., -1:, None]).min(dim=-2)
+        return x0, x1, x0_idx, x1_idx
 
-    fcdf0, fcdf1, fcdf0_idx, fcdf1_idx = find_interval(fcdf, return_idx=True)
+    fcdf0, _, fcdf0_idx, fcdf1_idx = find_interval(fcdf)
     fpdf0 = fpdf.take_along_dim(fcdf0_idx, dim=-1)
     fpdf1 = fpdf.take_along_dim(fcdf1_idx, dim=-1)
-    xp0, xp1 = find_interval(xp)
+    xp0, xp1, _, _ = find_interval(xp)
 
     offset = torch.where(
         (xp1 - xp0) == 0,

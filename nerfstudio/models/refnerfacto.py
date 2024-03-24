@@ -45,7 +45,7 @@ class RefNerfactoModelConfig(NerfactoModelConfig):
     """Std of bottleneck noise."""
     bottleneck_noise_steps: int = 10000
     """Steps of applying bottleneck noise."""
-    levels: int = 5
+    levels: int = 4
     """Degree of encoding for viewdirs or refdirs."""
     use_reflections: bool = True
     """If True, use refdirs instead of viewdirs."""

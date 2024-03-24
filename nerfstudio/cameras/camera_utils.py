@@ -464,7 +464,11 @@ def radial_and_tangential_undistort(
     return torch.stack([x, y], dim=-1)
 
 
-def rotation_matrix(a: Float[Tensor, "3"], b: Float[Tensor, "3"]) -> Float[Tensor, "3 3"]:
+def rotation_matrix(
+    a: Float[Tensor, "3"],
+    b: Float[Tensor, "3"],
+    eps: float = 1e-8,
+) -> Float[Tensor, "3 3"]:
     """Compute the rotation matrix that rotates vector a to vector b.
 
     Args:
@@ -478,7 +482,7 @@ def rotation_matrix(a: Float[Tensor, "3"], b: Float[Tensor, "3"]) -> Float[Tenso
     v = torch.linalg.cross(a, b)
     c = torch.dot(a, b)
     # If vectors are exactly opposite, we add a little noise to one of them
-    if c < -1 + 1e-8:
+    if c < -1 + eps:
         eps = (torch.rand(3) - 0.5) * 0.01
         return rotation_matrix(a + eps, b)
     s = torch.linalg.norm(v)
@@ -489,7 +493,7 @@ def rotation_matrix(a: Float[Tensor, "3"], b: Float[Tensor, "3"]) -> Float[Tenso
             [-v[1], v[0], 0],
         ]
     )
-    return torch.eye(3) + skew_sym_mat + skew_sym_mat @ skew_sym_mat * ((1 - c) / (s**2 + 1e-8))
+    return torch.eye(3, dtype=a.dtype, device=a.device) + skew_sym_mat + skew_sym_mat @ skew_sym_mat * ((1 - c) / (s**2 + eps))
 
 
 def focus_of_attention(
