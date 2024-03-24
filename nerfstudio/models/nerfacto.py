@@ -123,7 +123,7 @@ class NerfactoModelConfig(ModelConfig):
     """Whether to compute regularization on hash weights."""
     compute_appearence_regularization: bool = False
     """Whether to compute regularization on appearence embeddings."""
-    appearence_decay_loss_mult: float = 0.00001
+    appearence_decay_loss_mult: float = 0.001
     """Appearence decay loss multiplier."""
     compute_density_regularization: bool = False
     """Whether to compute regularization on density."""
@@ -204,6 +204,8 @@ class NerfactoModel(Model):
         if self.config.use_bundle_adjust:
             from nerfstudio.utils.writer import GLOBAL_BUFFER
             max_iters = GLOBAL_BUFFER.get("max_iter")
+            assert self.config.coarse_to_fine_iters is not None, "Define `coarse_to_fine_iters`."
+            assert max_iters is not None, "Define `max_iters` in GLOBAL_BUFFER."
             fine_iters = self.config.coarse_to_fine_iters[1]
             bundle_adjustment_max_num_iters = fine_iters * max_iters
             if bundle_adjustment_max_num_iters > self.config.proposal_weights_anneal_max_num_iters:

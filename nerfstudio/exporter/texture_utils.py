@@ -392,7 +392,7 @@ def export_textured_mesh(
     summary_log.append(f"Length of rendered rays to compute texture values: {raylen}")
 
     origins = origins - 0.5 * raylen * directions
-    pixel_area = torch.ones_like(origins[..., 0:1])
+    radii = torch.ones_like(origins[..., 0:1])
     camera_indices = torch.zeros_like(origins[..., 0:1])
     nears = torch.zeros_like(origins[..., 0:1])
     fars = torch.ones_like(origins[..., 0:1]) * raylen
@@ -400,7 +400,7 @@ def export_textured_mesh(
     camera_ray_bundle = RayBundle(
         origins=origins,
         directions=directions,
-        pixel_area=pixel_area,
+        radii=radii,
         camera_indices=camera_indices,
         nears=nears,
         fars=fars,

@@ -545,7 +545,7 @@ class VolumetricSampler(Sampler):
                 directions=dirs,
                 starts=starts[..., None],
                 ends=ends[..., None],
-                pixel_area=ray_bundle[ray_indices].pixel_area,
+                radii=ray_bundle[ray_indices].radii,
             ),
             camera_indices=camera_indices,
         )

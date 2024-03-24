@@ -33,7 +33,7 @@ from nerfstudio.configs.base_config import InstantiateConfig
 
 
 def delay(cls, lr_init: float) -> Callable:
-    """wrapper for making scheduler enabled with delay"""
+    """Wrapper for making scheduler enabled with delay"""
     def decorator(func: Callable) -> Callable:
         @wraps(func)
         def wrapper(*args, **kwargs) -> float:
@@ -59,7 +59,7 @@ class SchedulerConfig(InstantiateConfig):
     """Basic scheduler config"""
 
     _target: Type = field(default_factory=lambda: Scheduler)
-    """target class to instantiate"""
+    """Target class to instantiate"""
 
 
 class Scheduler:
@@ -88,7 +88,7 @@ class MultiStepSchedulerConfig(SchedulerConfig):
     """Config for multi step scheduler where lr decays by gamma every milestone"""
 
     _target: Type = field(default_factory=lambda: MultiStepScheduler)
-    """target class to instantiate"""
+    """Target class to instantiate"""
     max_steps: int = 1000000
     """The maximum number of steps."""
     gamma: float = 0.33
@@ -116,7 +116,7 @@ class ExponentialDecaySchedulerConfig(SchedulerConfig):
     """Config for exponential decay scheduler with warmup"""
 
     _target: Type = field(default_factory=lambda: ExponentialDecayScheduler)
-    """target class to instantiate"""
+    """Target class to instantiate"""
     lr_pre_warmup: float = 1e-8
     """Learning rate before warmup."""
     lr_final: Optional[float] = None
@@ -174,7 +174,7 @@ class CosineDecaySchedulerConfig(SchedulerConfig):
     """Config for cosine decay schedule"""
 
     _target: Type = field(default_factory=lambda: CosineDecayScheduler)
-    """target class to instantiate"""
+    """Target class to instantiate"""
     lr_pre_warmup: float = 1e-8
     """Learning rate before warmup."""
     warmup_steps: int = 0
@@ -205,6 +205,36 @@ class CosineDecayScheduler(Scheduler):
                 alpha = self.config.learning_rate_alpha
                 progress = (step - self.config.warmup_steps) / (self.config.max_steps - self.config.warmup_steps)
                 learning_factor = (np.cos(np.pi * progress) + 1.0) * 0.5 * (1 - alpha) + alpha
+            return learning_factor
+
+        scheduler = lr_scheduler.LambdaLR(optimizer, lr_lambda=func)
+        return scheduler
+
+
+@dataclass
+class MultiStepWarmupSchedulerConfig(MultiStepSchedulerConfig):
+    """Basic scheduler config with self-defined exponential decay schedule"""
+
+    _target: Type = field(default_factory=lambda: MultiStepWarmupScheduler)
+    """Target class to instantiate"""
+    warmup_steps: int = 5000
+    """Number of warmup steps."""
+
+
+class MultiStepWarmupScheduler(Scheduler):
+    """Starts with a flat lr schedule until it reaches N epochs then applies a given scheduler"""
+
+    config: MultiStepWarmupSchedulerConfig
+
+    def get_scheduler(self, optimizer: Optimizer, lr_init: float) -> LRScheduler:
+
+        @delay(self, lr_init)
+        def func(step: int):
+            if step < self.config.warmup_steps:
+                learning_factor = step / self.config.warmup_steps
+            else:
+                index = np.searchsorted(self.config.milestones, step, side='left')
+                learning_factor = self.config.gamma ** index
             return learning_factor
 
         scheduler = lr_scheduler.LambdaLR(optimizer, lr_lambda=func)

@@ -71,10 +71,13 @@ def validate_pipeline(normal_method: str, normal_output_name: str, pipeline: Pip
         CONSOLE.print("Checking that the pipeline has a normal output.")
         origins = torch.zeros((1, 3), device=pipeline.device)
         directions = torch.ones_like(origins)
-        pixel_area = torch.ones_like(origins[..., :1])
+        radii = torch.ones_like(origins[..., :1])
         camera_indices = torch.zeros_like(origins[..., :1])
         ray_bundle = RayBundle(
-            origins=origins, directions=directions, pixel_area=pixel_area, camera_indices=camera_indices
+            origins=origins,
+            directions=directions,
+            radii=radii,
+            camera_indices=camera_indices,
         )
         outputs = pipeline.model(ray_bundle)
         if normal_output_name not in outputs:

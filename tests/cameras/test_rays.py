@@ -23,7 +23,7 @@ def test_frustum_get_position():
         directions=direction,
         starts=frustum_start,
         ends=frustum_end,
-        pixel_area=torch.ones((1, 1)),
+        radii=torch.ones((1, 1)),
     )
 
     positions = frustum.get_positions()
@@ -38,7 +38,7 @@ def test_frustum_get_gaussian_blob():
         directions=torch.ones((5, 3)),
         starts=torch.ones((5, 1)),
         ends=torch.ones((5, 1)),
-        pixel_area=torch.ones((5, 1)),
+        radii=torch.ones((5, 1)),
     )
 
     gaussian_blob = frustum.get_conical_gaussian_blob()
@@ -53,7 +53,7 @@ def test_frustum_apply_masks():
         directions=torch.ones((5, 3)),
         starts=torch.ones((5, 1)),
         ends=torch.ones((5, 1)),
-        pixel_area=torch.ones((5, 1)),
+        radii=torch.ones((5, 1)),
     )
 
     mask = torch.tensor([False, True, False, True, True], dtype=torch.bool)
@@ -63,7 +63,7 @@ def test_frustum_apply_masks():
     assert frustum.directions.shape == (3, 3)
     assert frustum.starts.shape == (3, 1)
     assert frustum.ends.shape == (3, 1)
-    assert frustum.pixel_area.shape == (3, 1)
+    assert frustum.radii.shape == (3, 1)
 
 
 def test_get_mock_frustum():

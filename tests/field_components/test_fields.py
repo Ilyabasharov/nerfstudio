@@ -6,6 +6,7 @@ import torch
 from nerfstudio.cameras.rays import Frustums, RaySamples
 from nerfstudio.fields.nerfacto_field import NerfactoField
 from nerfstudio.utils.external import TCNN_EXISTS, tcnn_import_exception
+from nerfstudio.cameras.bundle_adjustment import HashBundleAdjustment
 
 
 def test_nerfacto_field():
@@ -21,17 +22,23 @@ def test_nerfacto_field():
         dtype=torch.float32,
         device=device,
     )
-    field = NerfactoField(aabb, num_images=1).to(device)
+    field = NerfactoField(
+        aabb=aabb,
+        bundle_adjustment=HashBundleAdjustment(use_bundle_adjust=False),
+        num_images=1,
+    ).to(device)
+
     num_rays = 1024
     num_samples = 256
     positions = torch.rand((num_rays, num_samples, 3), dtype=torch.float32, device=device)
     directions = torch.rand_like(positions)
+    bs = (*directions.shape[:-1], 1)
     frustums = Frustums(
         origins=positions,
         directions=directions,
-        starts=torch.zeros((*directions.shape[:-1], 1), device=device),
-        ends=torch.zeros((*directions.shape[:-1], 1), device=device),
-        pixel_area=torch.ones((*directions.shape[:-1], 1), device=device),
+        starts=torch.zeros(bs, device=device),
+        ends=torch.zeros(bs, device=device),
+        radii=torch.ones(bs, device=device),
     )
     ray_samples = RaySamples(
         frustums=frustums,

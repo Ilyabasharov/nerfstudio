@@ -46,8 +46,8 @@ class Frustums(TensorDataclass):
     """Where the frustum starts along a ray."""
     ends: Float[Tensor, "*bs 1"]
     """Where the frustum ends along a ray."""
-    pixel_area: Float[Tensor, "*bs 1"]
-    """Projected area of pixel a distance 1 away from origin."""
+    radii: Float[Tensor, "*bs 1"]
+    """Radii of projected area of pixel a distance 1 away from origin."""
     offsets: Optional[Float[Tensor, "*bs 3"]] = None
     """Offsets for each sample position"""
 
@@ -80,8 +80,6 @@ class Frustums(TensorDataclass):
         Returns:
             Conical frustums approximated by gaussian distribution.
         """
-        # Cone radius is set such that the square pixel_area matches the cone area.
-        cone_radius = torch.sqrt(self.pixel_area / torch.pi)
         if self.offsets is not None:
             raise NotImplementedError()
         return conical_frustum_to_gaussian(
@@ -89,7 +87,7 @@ class Frustums(TensorDataclass):
             directions=self.directions,
             starts=self.starts,
             ends=self.ends,
-            radius=cone_radius,
+            radius=self.radii,
         )
 
     def get_multisampled_gaussian_blob(self, rand: bool = False) -> Gaussians:
@@ -98,8 +96,6 @@ class Frustums(TensorDataclass):
         Returns:
             Conical frustums approximated by multisampled gaussian distribution.
         """
-        # Cone radius is set such that the square pixel_area matches the cone area.
-        cone_radius = torch.sqrt(self.pixel_area / torch.pi)
         if self.offsets is not None:
             raise NotImplementedError()
         return multisampled_frustum_to_gaussian(
@@ -107,7 +103,7 @@ class Frustums(TensorDataclass):
             directions=self.directions,
             starts=self.starts,
             ends=self.ends,
-            radius=cone_radius,
+            radius=self.radii,
             rand=rand,
         )
 
@@ -123,7 +119,7 @@ class Frustums(TensorDataclass):
             directions=torch.ones((1, 3), device=device),
             starts=torch.ones((1, 1), device=device),
             ends=torch.ones((1, 1), device=device),
-            pixel_area=torch.ones((1, 1), device=device),
+            radii=torch.ones((1, 1), device=device),
         )
     
     def get_steps(self) -> Float[Tensor, "*bs 1"]:
@@ -300,7 +296,7 @@ class RayBundle(TensorDataclass):
     """Ray origins (XYZ)"""
     directions: Float[Tensor, "*batch 3"]
     """Unit ray direction vector"""
-    pixel_area: Float[Tensor, "*batch 1"]
+    radii: Float[Tensor, "*batch 1"]
     """Projected area of pixel a distance 1 away from origin"""
     camera_indices: Optional[Int[Tensor, "*batch 1"]] = None
     """Camera indices"""
@@ -385,7 +381,7 @@ class RayBundle(TensorDataclass):
             directions=shaped_raybundle_fields.directions,  # [..., 1, 3]
             starts=bin_starts,  # [..., num_samples, 1]
             ends=bin_ends,  # [..., num_samples, 1]
-            pixel_area=shaped_raybundle_fields.pixel_area,  # [..., 1, 1]
+            radii=shaped_raybundle_fields.radii,  # [..., 1, 1]
         )
 
         ray_samples = RaySamples(
@@ -404,13 +400,14 @@ class RayBundle(TensorDataclass):
 
 def positions_to_ray_samples(positions: Float[Tensor, "*bs 3"]) -> RaySamples:
     """Convert positions to ray samples."""
+    shape = positions.shape
     ray_samples = RaySamples(
         frustums=Frustums(
             origins=positions,
-            directions=torch.ones_like(positions),
-            starts=torch.zeros_like(positions[..., :1]),
-            ends=torch.zeros_like(positions[..., :1]),
-            pixel_area=torch.ones_like(positions[..., :1]),
+            directions=positions.new_ones(*shape),
+            starts=positions.new_zeros((*shape[:-1], 1)),
+            ends=positions.new_zeros((*shape[:-1], 1)),
+            radii=positions.new_ones((*shape[:-1], 1)),
         )
     )
 

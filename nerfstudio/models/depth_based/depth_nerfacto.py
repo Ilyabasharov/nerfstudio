@@ -59,7 +59,7 @@ class DepthNerfactoModelConfig(NerfactoModelConfig):
     """Rate of exponential decay."""
     use_depth_loss: bool = True
     """Whether to use depth ranking loss for absolute depth."""
-    depth_loss_type: DepthLossType = DepthLossType.POWURF
+    depth_loss_type: DepthLossType = DepthLossType.URF
     """Depth loss type."""
     use_depth_ranking_loss: bool = True
     """Whether to use depth ranking loss for relative depth."""

@@ -31,7 +31,7 @@ from nerfstudio.utils.math import erf_approx
 from nerfstudio.cameras.bundle_adjustment import HashBundleAdjustment
 
 EPS = 1e-8
-ZIP_CONSTANT = math.sqrt(8.0)
+ZIP_CONSTANT = math.sqrt(8.)
 
 
 class ZipNerfactoField(NerfactoField):

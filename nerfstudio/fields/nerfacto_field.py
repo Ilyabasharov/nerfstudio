@@ -170,7 +170,6 @@ class NerfactoField(Field):
             out_activation=None,
             implementation=implementation,
         )
-        self.mlp_base = torch.nn.Sequential(self.mlp_base_grid, self.mlp_base_mlp)
 
         # transients
         if self.use_transient_embedding:

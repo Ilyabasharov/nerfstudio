@@ -104,8 +104,8 @@ class Frustums(TensorDataclass):
     """Where the frustum starts along a ray."""
     ends: TensorType["bs":..., 1]
     """Where the frustum ends along a ray."""
-    pixel_area: TensorType["bs":..., 1]
-    """Projected area of pixel a distance 1 away from origin."""
+    radii: TensorType["bs":..., 1]
+    """Radii of projected area of pixel a distance 1 away from origin."""
     ...
 ```
 

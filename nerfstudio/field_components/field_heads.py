@@ -47,6 +47,7 @@ class FieldHeadNames(Enum):
     SPECULAR_COLOR = "specular_color"
     DIFFUSE_COLOR = "diffuse_color"
     ROUGHNESS = "roughness"
+    OCCUPANCY = "occupancy"
 
 
 class FieldHead(FieldComponent):

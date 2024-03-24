@@ -665,7 +665,7 @@ class Cameras(TensorDataclass):
         # directions_stack[1] is the direction for ray in camera coordinates offset by 1 in x
         # directions_stack[2] is the direction for ray in camera coordinates offset by 1 in y
         cam_types = torch.unique(self.camera_type, sorted=False)
-        directions_stack = torch.empty((3,) + num_rays_shape + (3,), device=self.device)
+        directions_stack = coords.new_empty((3,) + num_rays_shape + (3,))
 
         c2w = self.camera_to_worlds[true_indices]
         assert c2w.shape == num_rays_shape + (3, 4)
@@ -866,8 +866,8 @@ class Cameras(TensorDataclass):
         dy = torch.sqrt(torch.sum((directions - directions_stack[2]) ** 2, dim=-1))  # ("num_rays":...,)
         assert dx.shape == num_rays_shape and dy.shape == num_rays_shape
 
-        pixel_area = (dx * dy)[..., None]  # ("num_rays":..., 1)
-        assert pixel_area.shape == num_rays_shape + (1,)
+        radii = torch.sqrt((dx * dy)[..., None] / torch.pi)  # ("num_rays":..., 1)
+        assert radii.shape == num_rays_shape + (1,)
 
         times = self.times[camera_indices, 0] if self.times is not None else None
 
@@ -881,12 +881,13 @@ class Cameras(TensorDataclass):
         else:
             metadata = {"directions_norm": directions_norm[0].detach()}
 
-        times = self.times[camera_indices, 0] if self.times is not None else None
+        # work in opengl format
+        metadata["ray_cos"] = directions @ directions.new_tensor([[0., 0., -1]]).T
 
         return RayBundle(
             origins=origins,
             directions=directions,
-            pixel_area=pixel_area,
+            radii=radii,
             camera_indices=camera_indices,
             times=times,
             metadata=metadata,

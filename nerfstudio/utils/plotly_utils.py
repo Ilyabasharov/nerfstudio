@@ -386,7 +386,7 @@ def get_frustum_mesh(
     if frustum.ndim > 1:
         raise ValueError("Frustum must be a single Frustum object.")
 
-    base_radius = torch.sqrt(frustum.pixel_area / torch.pi)
+    base_radius = frustum.radii
     f_radius = frustum.starts * base_radius
     b_radius = frustum.ends * base_radius
 

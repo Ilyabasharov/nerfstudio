@@ -34,7 +34,7 @@ from nerfstudio.field_components.field_heads import FieldHeadNames
 from nerfstudio.utils.math import reflect, linear_rgb_to_srgb, leaky_clip
 
 
-REF_CONSTANT = math.log(3.0)
+REF_CONSTANT = math.log(3.)
 EPS = 1e-8
 
 
@@ -378,17 +378,17 @@ class RefNerfactoField(NerfactoField):
                 # reflecting, because they point from the camera to the point,
                 # whereas `reflect` assumes they point toward the camera.
                 # Returned refdirs then point from the point to the environment.
+                assert ray_bundle is not None
                 ide_encoding_input = reflect(
                     -ray_bundle.directions[..., None, :],
                     pred_normals, # type: ignore
                 )
-
-            inputs_mlp_head.append(
-                self.ide_encoding(
-                    ide_encoding_input.view(-1, 3),
-                    pred_roughness.view(-1, 1), # type: ignore
-                )
+            # compute ide encoding
+            ide_encoding = self.ide_encoding(
+                ide_encoding_input.view(-1, 3),
+                pred_roughness.view(-1, 1), # type: ignore
             )
+            inputs_mlp_head.append(ide_encoding)
 
         # Append dot product between normal vectors and view directions.
         if self.use_n_dot_v:
@@ -424,18 +424,13 @@ class RefNerfactoField(NerfactoField):
             linear_rgb = specular_linear + diffuse_linear # type: ignore
             if self.srgb_mapping:
                 if self.srgb_mapping_normalization:
-                    # Ouputs will be in range [0; <=1]
+                    # Ouputs will be in range [0; 1]
                     linear_rgb_norm = linear_rgb.amax(dim=-1, keepdim=True)
                     linear_rgb = torch.where(
                         linear_rgb_norm > 1,
                         linear_rgb / linear_rgb_norm,
                         linear_rgb
                     )
-                    # linear_rgb_norm = torch.maximum(
-                    #     linear_rgb.amax(dim=-1, keepdim=True),
-                    #     linear_rgb.new_ones(linear_rgb.shape[0]),
-                    # )
-                    # linear_rgb = linear_rgb / linear_rgb_norm
                 
                 # Apply `leaky_clip` instead torch.clip to require gradients
                 rgb = linear_rgb_to_srgb(leaky_clip(linear_rgb))
@@ -450,8 +445,10 @@ class RefNerfactoField(NerfactoField):
         rgb = rgb * (1 + 2 * self.rgb_padding) - self.rgb_padding
 
         outputs[FieldHeadNames.RGB] = rgb.view(*outputs_shape, -1).to(directions_flat)
-        outputs[FieldHeadNames.DIFFUSE_COLOR] = diffuse.view(*outputs_shape, -1).to(directions_flat)
-        outputs[FieldHeadNames.SPECULAR_COLOR] = specular.view(*outputs_shape, -1).to(directions_flat)
+
+        if self.use_pred_diffuse_color:
+            outputs[FieldHeadNames.DIFFUSE_COLOR] = diffuse.view(*outputs_shape, -1).to(directions_flat)
+            outputs[FieldHeadNames.SPECULAR_COLOR] = specular.view(*outputs_shape, -1).to(directions_flat)
 
         # finally, compute regularisations for stable training
         self._compute_regularisations(outputs, camera_indices)

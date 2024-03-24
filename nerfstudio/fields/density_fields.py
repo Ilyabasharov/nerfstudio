@@ -25,7 +25,7 @@ from torch import Tensor, nn
 from nerfstudio.cameras.rays import RaySamples
 from nerfstudio.data.scene_box import SceneBox
 from nerfstudio.field_components.activations import trunc_exp
-from nerfstudio.field_components.encodings import HashEncoding
+from nerfstudio.field_components.encodings import HashEncoding, TriMipEncoding
 from nerfstudio.field_components.mlp import MLP
 from nerfstudio.field_components.spatial_distortions import SpatialDistortion
 from nerfstudio.fields.base_field import Field, FieldHeadNames
@@ -33,7 +33,8 @@ from nerfstudio.utils.math import erf_approx
 from nerfstudio.cameras.bundle_adjustment import HashBundleAdjustment
 
 EPS = 1.0e-8
-ZIP_CONSTANT = math.sqrt(8)
+ZIP_CONSTANT = math.sqrt(8.)
+TRIMIP_CONSTANT = math.sqrt(3.)
 
 
 class HashMLPDensityField(Field):
@@ -203,7 +204,7 @@ class HashMLPGaussianDensityField(HashMLPDensityField):
                     implementation=implementation,
                 )
             else:
-                self.network = torch.nn.Linear(self.last_dim, 1)
+                self.network = nn.Linear(self.last_dim, 1)
 
     def get_density(self, ray_samples: RaySamples) -> Tuple[Tensor, None]:
         """Computes and returns the densities."""
@@ -253,4 +254,91 @@ class HashMLPGaussianDensityField(HashMLPDensityField):
         # softplus, because it enables high post-activation (float32) density outputs
         # from smaller internal (float16) parameters.
         density = self.density_activation(density_before_activation.to(mean))
+        return density, None
+    
+
+class TrimipMLPDensityField(Field):
+
+    aabb: Tensor
+
+    def __init__(
+        self,
+        aabb: Tensor,
+        num_layers: int = 2,
+        hidden_dim: int = 64,
+        spatial_distortion: Optional[SpatialDistortion] = None,
+        use_linear: bool = False,
+        num_levels: int = 8,
+        plane_size: int = 512,
+        feature_dim: int = 16,
+        occ_grid_resolution: int = 128,
+        density_activation: Callable[[Tensor], Tensor] = lambda x: trunc_exp(x - 1),
+        implementation: Literal["tcnn", "torch"] = "torch",
+    ) -> None:
+        super().__init__()
+        self.register_buffer("aabb", aabb)
+        self.spatial_distortion = spatial_distortion
+        self.use_linear = use_linear
+        self.density_activation = density_activation
+
+        self.mlp_base_grid = TriMipEncoding(
+            n_levels=num_levels,
+            plane_size=plane_size,
+            feature_dim=feature_dim,
+        )
+
+        aabb_min, aabb_max = torch.split(self.aabb, 3, dim=-1)
+        self.aabb_size = aabb_max - aabb_min
+        assert (
+            self.aabb_size[0] == self.aabb_size[1] == self.aabb_size[2]
+        ), "Current implementation only supports cube aabb"
+
+        self.feature_vol_radii = self.aabb_size[0] / 2.0
+        self.register_buffer(
+            "occ_level_vol",
+            torch.log2(
+                self.aabb_size[0]
+                / occ_grid_resolution
+                / 2.0
+                / self.feature_vol_radii
+            ),
+        )
+
+        self.render_step_size = (
+            (self.scene_box.aabb[3:] - self.scene_box.aabb[:3]).max()
+            * TRIMIP_CONSTANT
+            / self.config.num_nerf_samples_per_ray
+        )
+
+        if not self.use_linear:
+            self.network = MLP(
+                in_dim=self.encoding.get_out_dim(),
+                num_layers=num_layers,
+                layer_width=hidden_dim,
+                out_dim=1,
+                activation=nn.ReLU(),
+                out_activation=None,
+                implementation=implementation,
+            )
+        else:
+            self.network = nn.Linear(self.encoding.get_out_dim(), 1)
+
+    def get_density(self, ray_samples: RaySamples) -> Tuple[Tensor, None]:
+        """Computes and returns the densities."""
+        if self.spatial_distortion is not None:
+            positions = self.spatial_distortion(ray_samples.frustums.get_positions())
+            positions = (positions + 2.0) / 4.0
+        else:
+            positions = SceneBox.get_normalized_positions(ray_samples.frustums.get_positions(), self.aabb)
+
+        # Make sure the tcnn gets inputs between 0 and 1.
+        selector = ((positions > 0.0) & (positions < 1.0)).all(dim=-1)
+        positions = positions * selector[..., None]
+        x = self.encoding(positions.view(-1, 3)).to(positions)
+        density_before_activation = self.network(x).view(*ray_samples.frustums.shape, -1)
+        # Rectifying the density with an exponential is much more stable than a ReLU or
+        # softplus, because it enables high post-activation (float32) density outputs
+        # from smaller internal (float16) parameters.
+        density = self.density_activation(density_before_activation)
+        density = density * selector[..., None]
         return density, None

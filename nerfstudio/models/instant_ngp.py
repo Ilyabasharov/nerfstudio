@@ -29,6 +29,7 @@ from torchmetrics.functional import structural_similarity_index_measure
 from torchmetrics.image import PeakSignalNoiseRatio
 from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 
+from nerfstudio.cameras.bundle_adjustment import HashBundleAdjustment
 from nerfstudio.cameras.rays import RayBundle, positions_to_ray_samples
 from nerfstudio.engine.callbacks import (
     TrainingCallback,
@@ -111,6 +112,7 @@ class NGPModel(Model):
 
         self.field = NerfactoField(
             aabb=self.scene_box.aabb,
+            bundle_adjustment=HashBundleAdjustment(use_bundle_adjust=False),
             appearance_embedding_dim=0 if self.config.use_appearance_embedding else 32,
             num_images=self.num_train_data,
             log2_hashmap_size=self.config.log2_hashmap_size,

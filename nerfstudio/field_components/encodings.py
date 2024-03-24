@@ -27,6 +27,7 @@ import torch.nn.functional as F
 from jaxtyping import Float, Int, Shaped
 from torch import Tensor, nn
 from torch_scatter import segment_coo
+import nvdiffrast.torch
 
 from nerfstudio.field_components.base_field_component import FieldComponent
 from nerfstudio.utils.math import (
@@ -35,8 +36,8 @@ from nerfstudio.utils.math import (
     grid_resolution,
     grid_scale,
     next_multiple,
+    sph_harm_coeff,
 )
-from nerfstudio.field_components.activations import trunc_exp
 from nerfstudio.utils.printing import print_tcnn_speed_warning
 from nerfstudio.cameras.bundle_adjustment import HashBundleAdjustment
 from nerfstudio.utils.external import tcnn, TCNN_EXISTS
@@ -847,34 +848,54 @@ class SHEncoding(Encoding):
     
     def forward(self, in_tensor: Float[Tensor, "*bs input_dim"]) -> Float[Tensor, "*bs output_dim"]:
         return self.she_encoding_fwd(in_tensor)
-    
 
-class IDEncoding(SHEncoding):
+
+class IDEncoding(Encoding):
     """Module for integrated directional encoding (IDE).
         from Equations 6-8 of arxiv.org/abs/2112.03907.
-    
-        Args:
-            levels: Number of spherical harmonic levels to encode.
     """
 
-    harmonic_counts: List[int] = [1, 3, 5, 7, 9, 11, 13, 15]
+    def __init__(self, levels: int = 4, **kwargs) -> None:
+        """Initialize integrated directional encoding (IDE) module.
+        Args:
+            levels: number of spherical harmonics degrees to use.
+        """
+        super().__init__(in_dim=3)
+        self.levels = levels
 
-    def __init__(self, levels: int = 4, implementation: Literal["tcnn", "torch"] = "tcnn") -> None:
-        super().__init__(levels=levels, implementation=implementation)
+        if levels > 4:
+            raise ValueError("Only levels of at most 4 is numerically stable.")
 
-        levels_count = torch.tensor([
-            x for i, y in enumerate(self.harmonic_counts[:levels])
-            for x in [i] * y
-        ])
+        ml_array = self._get_ml_array(levels)
+        l_max = 2 ** (levels - 1)
 
-        self.register_buffer(
-            "sigma",
-            (levels_count + 1) * levels_count / 2,
-        )
+        # Create a matrix corresponding to ml_array holding all coefficients, which,
+        # when multiplied (from the right) by the z coordinate Vandermonde matrix,
+        # results in the z component of the encoding.
+        mat = np.zeros((l_max + 1, ml_array.shape[1]))
+        for i, (m, l) in enumerate(ml_array.T):
+            for k in range(l - m + 1):
+                mat[k, i] = sph_harm_coeff(l, m, k)
+
+        sigma = 0.5 * ml_array[1, :] * (ml_array[1, :] + 1)
+        self.register_buffer("mat", torch.from_numpy(mat).to(torch.float32), False)
+        self.register_buffer("ml_array", torch.from_numpy(ml_array).to(torch.float32), False)
+        self.register_buffer("pow_level", torch.arange(l_max + 1).to(torch.float32), False)
+        self.register_buffer("sigma", torch.from_numpy(sigma).to(torch.float32), False)
+
+    def get_out_dim(self) -> int:
+        return (2**self.levels - 1 + self.levels) * 2
+
+    @staticmethod
+    def _get_ml_array(levels: int) -> np.ndarray:
+        """Create a list with all pairs of (l, m) values to use in the encoding."""
+        ml_list = [(m, 2**i) for i in range(levels) for m in range(2**i + 1)]
+        ml_array = np.array(ml_list).T
+        return ml_array
 
     def forward(
         self,
-        in_tensor: Float[Tensor, "*bs 3"],
+        in_tensor: Float[Tensor, "*bs input_dim"],
         roughness: Float[Tensor, "*bs 1"],
     ) -> Float[Tensor, "*bs output_dim"]:
         """Compute integrated directional encoding (IDE).
@@ -883,10 +904,246 @@ class IDEncoding(SHEncoding):
             roughness: [..., 1] reciprocal of the concentration parameter of the von
                 Mises-Fisher distribution.
         """
-        # Apply attenuation function using the von Mises-Fisher distribution
-        # concentration parameter, kappa.
-        attenuation = trunc_exp(-roughness * self.sigma)
+        x = in_tensor[..., 0:1]
+        y = in_tensor[..., 1:2]
+        z = in_tensor[..., 2:3]
         
-        # generate she harmonics
-        harmonics = self.she_encoding_fwd(in_tensor)
-        return harmonics * attenuation
+        # avoid 0 + 0j exponentiation
+        zero_xy = torch.logical_and(x == 0, y == 0)
+        y = y + zero_xy
+
+        vmz = z ** self.pow_level
+        vmxy = (x + 1j * y) ** self.ml_array[0, :]
+        sph_harms = vmxy * torch.matmul(vmz, self.mat)
+        ide = sph_harms * torch.exp(-self.sigma * roughness)
+
+        return torch.cat([torch.real(ide), torch.imag(ide)], dim=-1)
+
+
+class TriMipEncoding(Encoding):
+    """Module for Tri-Mip Representation for Efficient Anti-Aliasing Neural Radiance Fields
+    arxiv.org/abs/2307.11335.
+    """
+    def __init__(
+        self,
+        n_levels: int,
+        plane_size: int,
+        feature_dim: int,
+        include_xyz: bool = False,
+    ):
+        super().__init__(in_dim=3)
+        self.n_levels = n_levels
+        self.plane_size = plane_size
+        self.feature_dim = feature_dim
+        self.include_xyz = include_xyz
+
+        self.build_nn_modules()
+
+    def build_nn_modules(self, eps: float = 1e-2) -> None:
+        """Build module and init weights"""
+        self.fm = nn.Parameter(torch.empty(3, self.plane_size, self.plane_size, self.feature_dim))
+        nn.init.uniform_(self.fm, -eps, eps)
+
+    def get_out_dim(self) -> int:
+        return (
+            self.feature_dim * 3 + 3 
+            if self.include_xyz
+            else self.feature_dim * 3
+        )
+
+    def forward(self, x: Tensor, level: Optional[Tensor]) -> Tensor:
+        # x in [0,1], level in [0, max_level]
+        # x is Nx3, level is Nx1
+        if 0 == x.shape[0]:
+            return x.new_zeros([x.shape[0], self.feature_dim * 3])
+        decomposed_x = torch.stack(
+            [
+                x[:, None, [1, 2]],
+                x[:, None, [0, 2]],
+                x[:, None, [0, 1]],
+            ],
+            dim=0,
+        )  # 3xNx1x2
+        if 0 == self.n_levels:
+            level = None
+        else:
+            assert isinstance(level, Tensor)
+            level = level.expand(decomposed_x.shape[:3]).contiguous()
+
+        enc = nvdiffrast.torch.texture(
+            self.fm,
+            decomposed_x,
+            mip_level_bias=level,
+            boundary_mode="clamp",
+            max_mip_level=self.n_levels - 1,
+        )  # 3xNx1xC
+        assert enc is not None, "Error in `nvdiffrast.torch.texture`. Check your inputs."
+        enc = (
+            enc.permute(1, 2, 0, 3)
+            .contiguous()
+            .view(
+                x.shape[0],
+                self.feature_dim * 3,
+            )
+        )  # Nx(3C)
+        if self.include_xyz:
+            enc = torch.cat([x, enc], dim=-1)
+        return enc
+    
+
+class PeriodicVolumeEncoding(Encoding):
+    """Periodic Volume encoding
+    Args:
+        num_levels: Number of feature grids.
+        min_res: Resolution of smallest feature grid.
+        max_res: Resolution of largest feature grid.
+        log2_hashmap_size: Size of hash map is 2^log2_hashmap_size.
+        features_per_level: Number of features per level.
+        hash_init_scale: Value to initialize hash grid.
+        implementation: Implementation of hash encoding. Fallback to torch if tcnn not available.
+    """
+
+    def __init__(
+        self,
+        num_levels: int = 16,
+        min_res: int = 16,
+        max_res: int = 1024,
+        log2_hashmap_size: int = 19,
+        features_per_level: int = 2,
+        hash_init_scale: float = 0.001,
+        smoothstep: bool = False,
+    ) -> None:
+
+        super().__init__(in_dim=3)
+        self.num_levels = num_levels
+        self.features_per_level = features_per_level
+        self.log2_hashmap_size = log2_hashmap_size
+        assert log2_hashmap_size % 3 == 0
+        self.hash_table_size = 2**log2_hashmap_size
+        self.n_output_dims = num_levels * features_per_level
+        self.smoothstep = smoothstep
+
+        levels = torch.arange(num_levels)
+        growth_factor = np.exp((np.log(max_res) - np.log(min_res)) / (num_levels - 1))
+        self.scalings = torch.floor(min_res * growth_factor**levels)
+
+        self.periodic_volume_resolution = 2 ** (log2_hashmap_size // 3)
+
+        self.register_buffer("hash_offset", levels * self.hash_table_size, False)
+        self.hash_table = torch.rand(size=(self.hash_table_size * num_levels, features_per_level)) * 2 - 1
+        self.hash_table *= hash_init_scale
+        self.hash_table = nn.Parameter(self.hash_table)
+
+        # TODO weight loss by level?
+        self.per_level_weights = 1.0
+
+    def get_out_dim(self) -> int:
+        return self.num_levels * self.features_per_level
+
+    def hash_fn(
+        self,
+        in_tensor_x: Int[Tensor, "*bs num_levels"],
+        in_tensor_y: Int[Tensor, "*bs num_levels"],
+        in_tensor_z: Int[Tensor, "*bs num_levels"],
+    ) -> Int[Tensor, "*bs num_levels"]:
+        """Returns hash tensor using method described in Instant-NGP
+        Args:
+            in_tensor: Tensor to be hashed
+        """
+
+        # round to make it perioidic
+        in_tensor_x %= self.periodic_volume_resolution
+        in_tensor_y %= self.periodic_volume_resolution
+        in_tensor_z %= self.periodic_volume_resolution
+
+        # xyz to index
+        x = (
+            in_tensor_x * (self.periodic_volume_resolution ** 2)
+            + in_tensor_y * (self.periodic_volume_resolution)
+            + in_tensor_z
+        )
+
+        # offset by feature levels
+        x += self.hash_offset
+
+        return x.long()
+
+    def pytorch_fwd(self, in_tensor: Float[Tensor, "*bs input_dim"]) -> Float[Tensor, "*bs output_dim"]:
+        """Forward pass using pytorch. Significantly slower than TCNN implementation."""
+
+        assert in_tensor.shape[-1] == 3
+        in_tensor = in_tensor[..., None, :]  # [..., 1, 3]
+        scaled = in_tensor * self.scalings  # [..., L, 3]
+        scaled_c = torch.ceil(scaled).type(torch.int32)
+        scaled_f = torch.floor(scaled).type(torch.int32)
+
+        offset = scaled - scaled_f
+
+        if self.smoothstep:
+            offset = offset * offset * (3.0 - 2.0 * offset)
+
+        scaled_cx = scaled_c[..., 0]
+        scaled_cy = scaled_c[..., 1]
+        scaled_cz = scaled_c[..., 2]
+        scaled_fx = scaled_f[..., 0]
+        scaled_fy = scaled_f[..., 1]
+        scaled_fz = scaled_f[..., 2]
+
+        hashed_0 = self.hash_fn(scaled_cx, scaled_cy, scaled_cz)  # [..., num_levels]
+        hashed_1 = self.hash_fn(scaled_cx, scaled_fy, scaled_cz)
+        hashed_2 = self.hash_fn(scaled_fx, scaled_fy, scaled_cz)
+        hashed_3 = self.hash_fn(scaled_fx, scaled_cy, scaled_cz)
+        hashed_4 = self.hash_fn(scaled_cx, scaled_cy, scaled_fz)
+        hashed_5 = self.hash_fn(scaled_cx, scaled_fy, scaled_fz)
+        hashed_6 = self.hash_fn(scaled_fx, scaled_fy, scaled_fz)
+        hashed_7 = self.hash_fn(scaled_fx, scaled_cy, scaled_fz)
+
+        f_0 = self.hash_table[hashed_0]  # [..., num_levels, features_per_level]
+        f_1 = self.hash_table[hashed_1]
+        f_2 = self.hash_table[hashed_2]
+        f_3 = self.hash_table[hashed_3]
+        f_4 = self.hash_table[hashed_4]
+        f_5 = self.hash_table[hashed_5]
+        f_6 = self.hash_table[hashed_6]
+        f_7 = self.hash_table[hashed_7]
+
+        offset_x = offset[..., 0:1]
+        offset_y = offset[..., 1:2]
+        offset_z = offset[..., 2:3]
+
+        f_03 = f_0 * offset_x + f_3 * (1 - offset_x)
+        f_12 = f_1 * offset_x + f_2 * (1 - offset_x)
+        f_56 = f_5 * offset_x + f_6 * (1 - offset_x)
+        f_47 = f_4 * offset_x + f_7 * (1 - offset_x)
+
+        f0312 = f_03 * offset_y + f_12 * (1 - offset_y)
+        f4756 = f_47 * offset_y + f_56 * (1 - offset_y)
+
+        encoded_value = f0312 * offset_z + f4756 * (
+            1 - offset_z
+        )  # [..., num_levels, features_per_level]
+
+        return encoded_value.flatten(start_dim=-2, end_dim=-1)  # [..., num_levels * features_per_level]
+
+    def forward(self, in_tensor: Float[Tensor, "*bs input_dim"]) -> Float[Tensor, "*bs output_dim"]:
+        return self.pytorch_fwd(in_tensor)
+
+    def get_total_variation_loss(self):
+        """Compute the total variation loss for the feature volume."""
+        feature_volume = self.hash_table.view(
+            self.num_levels,
+            self.periodic_volume_resolution,
+            self.periodic_volume_resolution,
+            self.periodic_volume_resolution,
+            self.features_per_level,
+        )
+        diffx = feature_volume[:, 1:, :, :, :] - feature_volume[:, :-1, :, :, :]
+        diffy = feature_volume[:, :, 1:, :, :] - feature_volume[:, :, :-1, :, :]
+        diffz = feature_volume[:, :, :, 1:, :] - feature_volume[:, :, :, :-1, :]
+
+        # TODO how to sum here or should we use mask?
+        resx = diffx.abs().mean(dim=(1, 2, 3, 4))
+        resy = diffy.abs().mean(dim=(1, 2, 3, 4))
+        resz = diffz.abs().mean(dim=(1, 2, 3, 4))
+
+        return ((resx + resy + resz) * self.per_level_weights).mean()
